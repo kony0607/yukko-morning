@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>受け取り受付（端末固定）</title>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <style>
+    body{font-family:Meiryo, 'Noto Sans JP',sans-serif;margin:0;background:#f6f3ea;color:#1d1b16}
+    .wrap{max-width:720px;margin:0 auto;padding:18px}
+    .title{font-size:18px;font-weight:700;margin-bottom:10px}
+    #reader{width:100%;height:320px;background:#fff;border-radius:12px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center}
+    .note{margin-top:12px;color:#666}
+    .big{font-size:36px;font-weight:800;text-align:center;margin-top:18px}
+    .muted{color:#888}
+    .btn-row{display:flex;gap:8px;margin-top:12px}
+    .btn{padding:10px 12px;border-radius:10px;border:0;cursor:pointer}
+    .btn-primary{background:#1d6b4b;color:#fff}
+    .btn-ghost{background:#fff;border:1px solid #ddd}
+    #pickupResult{margin-top:14px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">受け取り受付 — お客様用（画面固定で使用してください）</div>
+    <div id="reader">カメラを起動中...</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="restartScanner()">再起動</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('fileInput').click()">写真で読み取る</button>
+      <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFile(event)" />
+    </div>
+    <div class="manual" style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+      <input id="manualInput" placeholder="ロッカー番号または呼び出し番号（例:10001 or 001）" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ddd;" onkeydown="if(event.key==='Enter')onManualConfirm()" />
+      <button class="btn btn-primary" onclick="onManualConfirm()">確認</button>
+    </div>
+    <div class="note">1回目のスキャン → 受付（席へ戻す）。2回目のスキャン → 提供済みにします。20秒以内の連続スキャンは誤操作として無視されます。</div>
+    <div id="pickupResult"></div>
+  </div>
+
+  <script>
+  // Firebase 設定（index.html と同じ）
+  const firebaseConfig = {
+    apiKey: "AIzaSyCImbm2Eg_eGrChlSfEd4eJii_TCRrPl0o",
+    authDomain: "yukko-morning.firebaseapp.com",
+    databaseURL: "https://yukko-morning-default-rtdb.firebaseio.com",
+    projectId: "yukko-morning",
+    storageBucket: "yukko-morning.firebasestorage.app",
+    messagingSenderId: "282456272088",
+    appId: "1:282456272088:web:1f529eab40f32630927bad",
+    measurementId: "G-KFK1Q7RW1V"
+  };
+
+  let firebaseApp = null; let database = null; let firebaseEnabled = false;
+  try { firebaseApp = firebase.initializeApp(firebaseConfig); database = firebase.database(firebaseApp); firebaseEnabled = true; } catch(e) { console.warn('Firebase init failed', e.message); }
+
+  const ORDERS = [];
+  let html5QrCode = null;
+  const IGNORE_WINDOW_MS = 20 * 1000; // 20秒
+
+  function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
+  function buildCodeCandidates(raw){
+    const digits = normalizeDigits(raw); if(!digits) return [];
+    const s = new Set(); s.add(digits);
+    if(digits.length>=5){ s.add(digits.slice(0,5)); s.add(digits.slice(-5)); }
+    if(digits.length>=3){ s.add(digits.slice(-3)); if(digits.length>=5) s.add(digits.slice(1,4)); }
+    return Array.from(s);
+  }
+
+  function findOrderByRaw(raw){
+    const cands = buildCodeCandidates(raw);
+    return ORDERS.find(o => !o.served && cands.some(c=> o.lockerFull===c || o.callCode===c));
+  }
+
+  function startScanner(){
+    const reader = document.getElementById('reader');
+    const secureContext = window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ reader.innerHTML = '<div class="muted">カメラは HTTPS または localhost でしか利用できません。写真で読み取ってください。</div>'; return; }
+    try{
+      html5QrCode = new Html5Qrcode('reader');
+      html5QrCode.start({facingMode:'environment'}, {fps:10, qrbox:250}, decoded => {
+        if(normalizeDigits(decoded)){
+          processScan(decoded);
+        }
+      }).catch(err => { reader.innerHTML = '<div class="muted">カメラ起動に失敗しました。</div>'; });
+    }catch(e){ reader.innerHTML = '<div class="muted">カメラ初期化失敗</div>'; }
+  }
+
+  function stopScanner(){ if(html5QrCode){ try{ html5QrCode.stop().catch(()=>{}); }catch(e){} html5QrCode=null; }}
+  function restartScanner(){ stopScanner(); startScanner(); }
+
+  async function processScan(raw){
+    const now = Date.now();
+    const order = findOrderByRaw(raw);
+    if(!order){ showMessage('未登録の注文番号です。スタッフにお知らせください。','muted'); return; }
+    if(order.served){ showMessage('この注文は既に提供済みです。','muted'); return; }
+    const last = order.lastScanAt ? new Date(order.lastScanAt).getTime() : 0;
+    if(last && (now - last) < IGNORE_WINDOW_MS){ showMessage('連続スキャンと判断しました（ミス）。しばらく待ってください。','muted'); return; }
+    if(!order.checkedInAt){
+      order.checkedInAt = new Date().toISOString();
+      order.lastScanAt = new Date().toISOString();
+      order.status = 'checked-in';
+      await updateOrder(order);
+      showMessage('受付完了。席に戻ってお待ちください。','big');
+      return;
+    }
+    order.served = true; order.servedAt = new Date().toISOString(); order.lastScanAt = new Date().toISOString(); order.status = 'served';
+    await updateOrder(order);
+    showMessage('提供済みにしました。ありがとうございました。','big');
+  }
+
+  function showMessage(text, cls){ const el = document.getElementById('pickupResult'); el.innerHTML = `<div class="${cls}">${text}</div>`; setTimeout(()=>{ el.innerHTML=''; restartScanner(); }, 2800); }
+
+
+  // 手入力での確認（2回方式対応）
+  function onManualConfirm(){
+    const v = document.getElementById('manualInput').value.trim();
+    if(!v) return;
+    // 処理はカメラスキャンと同じ
+    processScan(v);
+    document.getElementById('manualInput').value = '';
+  }
+  async function updateOrder(order){ if(!firebaseEnabled || !database) return; try{ await database.ref('orders/' + order.firebaseKey).update({ checkedInAt: order.checkedInAt || null, lastScanAt: order.lastScanAt || null, served: !!order.served, servedAt: order.servedAt || null, status: order.status || null }); }catch(e){ console.error('Firebase update failed', e); } }
+
+  function onFile(ev){ const f = ev.target.files && ev.target.files[0]; if(!f) return; const r = new Html5Qrcode('reader'); r.scanFile(f, true).then(decoded => { processScan(decoded); }).catch(()=>{ showMessage('写真から読み取れませんでした。明るく撮影し直してください。','muted'); }); ev.target.value=''; }
+
+  function syncFromFirebase(){ if(!firebaseEnabled || !database) return; const ref = database.ref('orders'); ref.on('value', snap => { const data = snap.val() || {}; ORDERS.length = 0; Object.keys(data).forEach(k => { ORDERS.push({ firebaseKey: k, ...data[k] }); }); console.log('pickup synced', ORDERS.length); }); }
+
+  if(firebaseEnabled) syncFromFirebase(); startScanner();
+  </script>
+</body>
+</html>

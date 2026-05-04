@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>スタッフ用キュー（調理順表示）</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <style>
+    body{font-family:Meiryo, 'Noto Sans JP',sans-serif;background:#f6f3ea;color:#1d1b16;margin:0}
+    .wrap{max-width:980px;margin:0 auto;padding:18px}
+    .title{font-size:18px;font-weight:800;margin-bottom:12px}
+    .grid{display:grid;grid-template-columns:1fr 320px;gap:12px}
+    .card{background:#fff;padding:12px;border-radius:12px;border:1px solid #ded7c6}
+    .card h3{margin:0 0 8px 0;font-size:14px}
+    .list{display:flex;flex-direction:column;gap:8px}
+    .row{padding:8px;border-radius:8px;border:1px solid #eee;display:flex;justify-content:space-between;align-items:center}
+    .bento{font-weight:700}
+    .muted{color:#777}
+    .pill{background:#f1ece1;padding:6px 8px;border-radius:999px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">スタッフ画面 — 調理順キュー</div>
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h3>次に作る順番（受付順）</h3>
+          <div id="nextList" class="list"></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h3>未受取一覧（詳細）</h3>
+          <div id="waitingDetailed" class="list"></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h3>品目別カウント（未受取）</h3>
+          <div id="counts" class="list"></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h3>同期状況</h3>
+          <div id="status" class="muted">---</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // Firebase 設定（index.html と同じ）
+  const firebaseConfig = {
+    apiKey: "AIzaSyCImbm2Eg_eGrChlSfEd4eJii_TCRrPl0o",
+    authDomain: "yukko-morning.firebaseapp.com",
+    databaseURL: "https://yukko-morning-default-rtdb.firebaseio.com",
+    projectId: "yukko-morning",
+    storageBucket: "yukko-morning.firebasestorage.app",
+    messagingSenderId: "282456272088",
+    appId: "1:282456272088:web:1f529eab40f32630927bad",
+    measurementId: "G-KFK1Q7RW1V"
+  };
+
+  let firebaseApp = null; let database = null; let firebaseEnabled = false;
+  try{ firebaseApp = firebase.initializeApp(firebaseConfig); database = firebase.database(firebaseApp); firebaseEnabled = true; }catch(e){ console.warn('Firebase init failed', e.message); }
+
+  const ORDERS = [];
+
+  function sync(){ if(!firebaseEnabled || !database) return; const ref = database.ref('orders'); ref.on('value', snap => { const data = snap.val() || {}; ORDERS.length = 0; Object.keys(data).forEach(k => { ORDERS.push({ firebaseKey: k, ...data[k] }); }); renderAll(); document.getElementById('status').textContent = '同期済み ' + new Date().toLocaleTimeString(); }); }
+
+  function renderAll(){ renderCounts(); renderNextList(); renderWaitingDetailed(); }
+
+  function renderCounts(){ const keys = ['wa','morning_set','morning']; const container = document.getElementById('counts'); container.innerHTML = keys.map(k => { const total = ORDERS.filter(o => o.bento===k).reduce((s,o)=> s + (o.quantity||1), 0); const remain = ORDERS.filter(o => o.bento===k && !o.served).reduce((s,o)=> s + (o.quantity||1), 0); const label = k==='wa' ? '和食' : (k==='morning_set' ? 'モーニングセット' : 'モーニング'); return `<div class="row"><div><div class="bento">${label}</div><div class="muted">未受取:${remain} / 総:${total}</div></div><div class="pill">${remain}</div></div>`; }).join(''); }
+
+  function renderNextList(){
+    // 優先 = checkedInAt（受付された順）。checkedInAtのないものは createdAt の順。
+    const unserved = ORDERS.filter(o => !o.served).slice().sort((a,b) => {
+      const ta = a.checkedInAt ? new Date(a.checkedInAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const tb = b.checkedInAt ? new Date(b.checkedInAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      return ta - tb;
+    });
+
+    const container = document.getElementById('nextList');
+    if(!unserved.length){ container.innerHTML = '<div class="muted">調理する注文はありません</div>'; return; }
+
+    // 先頭から順に表示（弁当種別と呼び出し番号）
+    container.innerHTML = unserved.slice(0, 40).map(o => {
+      const label = o.bento === 'wa' ? '和食' : (o.bento === 'morning_set' ? 'モーニングセット' : 'モーニング');
+      const t = o.checkedInAt ? new Date(o.checkedInAt).toLocaleTimeString() : (o.createdAt ? new Date(o.createdAt).toLocaleTimeString() : '');
+      return `<div class="row"><div><div class="bento">${label} <span class="muted">(${o.callCode})</span></div><div class="muted">受付: ${t}</div></div><div class="pill">${o.quantity||1}</div></div>`;
+    }).join('');
+  }
+
+  function renderWaitingDetailed(){ const container = document.getElementById('waitingDetailed'); const waiting = ORDERS.filter(o => !o.served).slice().sort((a,b)=> (a.callCode||'') > (b.callCode||'')); if(!waiting.length){ container.innerHTML = '<div class="muted">全員受取済み</div>'; return; } container.innerHTML = waiting.map(o=> `<div class="row"><div><div><strong>${o.callCode}</strong> ${o.lockerFull}</div><div class="muted">${o.bento} / 個数:${o.quantity||1}</div></div><div class="muted">${o.checkedInAt? '受付:' + new Date(o.checkedInAt).toLocaleTimeString() : ''}</div></div>`).join(''); }
+
+  if(firebaseEnabled) sync();
+  </script>
+</body>
+</html>
