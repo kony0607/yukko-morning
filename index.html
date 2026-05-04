@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>お弁当統合システム</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#f6f3ea;
+  --surface:#ffffff;
+  --surface2:#f1ece1;
+  --border:#ded7c6;
+  --border2:#cfc7b4;
+  --text:#1d1b16;
+  --text2:#6b675e;
+  --text3:#9a9387;
+  --accent:#1d6b4b;
+  --accent2:#dff0e7;
+  --danger:#b63a33;
+  --danger2:#fbe9e7;
+  --warm:#9a6b1e;
+  --warm2:#f8eed9;
+  --radius:18px;
+  --radius-sm:12px;
+}
+html,body{min-height:100%;background:
+  radial-gradient(circle at top left, rgba(29,107,75,.08), transparent 26%),
+  radial-gradient(circle at 90% 10%, rgba(154,107,30,.08), transparent 22%),
+  var(--bg);
+  color:var(--text);
+  font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;
+}
+body{min-height:100vh;}
+.header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:16px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.header-left{display:flex;flex-direction:column;gap:3px;}
+.header-title{font-size:17px;font-weight:700;letter-spacing:.03em;}
+.header-sub{font-size:12px;color:var(--text3);}
+.status-pill{font-size:11px;padding:4px 10px;border-radius:999px;font-weight:700;white-space:nowrap;}
+.status-setup{background:var(--warm2);color:var(--warm);}
+.status-running{background:var(--accent2);color:var(--accent);}
+.status-closed{background:var(--danger2);color:var(--danger);}
+.nav{display:flex;gap:8px;overflow-x:auto;padding:12px 12px 0;scrollbar-width:none;}
+.nav::-webkit-scrollbar{display:none;}
+.nav-btn{flex:0 0 auto;padding:11px 15px;border:1px solid var(--border2);border-radius:999px;background:rgba(255,255,255,.7);color:var(--text2);font-size:13px;cursor:pointer;}
+.nav-btn.on{background:var(--accent);border-color:var(--accent);color:#fff;}
+.main{max-width:900px;margin:0 auto;padding:14px 12px 28px;}
+.panel{display:none;}
+.panel.on{display:block;}
+.card{background:rgba(255,255,255,.92);border:1px solid var(--border);border-radius:var(--radius);padding:16px 16px 14px;box-shadow:0 10px 30px rgba(29,27,22,.04);margin-bottom:12px;}
+.card-title{font-size:12px;font-weight:700;color:var(--text2);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px;}
+.note{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;font-size:13px;line-height:1.7;color:var(--text2);}
+.grid-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.grid-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+@media (max-width:720px){.grid-2,.grid-3{grid-template-columns:1fr;}}
+.field{display:flex;flex-direction:column;gap:6px;}
+.label{font-size:11px;color:var(--text3);}
+.input,.select,.textarea{width:100%;padding:12px 13px;border:1px solid var(--border2);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:14px;}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(29,107,75,.08);}
+.textarea{min-height:96px;resize:vertical;}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;}
+.btn-primary,.btn-secondary,.btn-ghost{border:none;border-radius:var(--radius-sm);cursor:pointer;font-weight:700;}
+.btn-primary{background:var(--accent);color:#fff;padding:13px 16px;}
+.btn-primary:hover{opacity:.94;}
+.btn-secondary{background:var(--surface2);color:var(--text);padding:13px 16px;border:1px solid var(--border2);}
+.btn-ghost{background:transparent;color:var(--text2);padding:12px 15px;border:1px solid var(--border);}
+.btn-danger{background:var(--danger2);color:var(--danger);padding:12px 15px;border:1px solid #e8b7b3;}
+.btn-primary:disabled{background:#aac2b4;cursor:default;}
+.tabs{display:flex;gap:8px;margin-bottom:12px;}
+.tab{flex:1;padding:10px 12px;border:1px solid var(--border2);border-radius:999px;background:var(--surface);color:var(--text2);font-size:13px;cursor:pointer;}
+.tab.on{background:var(--accent2);color:var(--accent);border-color:var(--accent);font-weight:700;}
+.helper{font-size:12px;color:var(--text3);line-height:1.6;margin-top:8px;}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;}
+.kpi{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;}
+.kpi-n{font-size:24px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+.kpi-l{font-size:11px;color:var(--text2);margin-top:5px;}
+.list{display:flex;flex-direction:column;gap:10px;}
+.row{border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);padding:12px 13px;}
+.row-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}
+.row-main{min-width:0;}
+.row-code{font-size:28px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+.row-sub{font-size:11px;color:var(--text3);margin-top:4px;}
+.row-title{font-size:15px;font-weight:700;}
+.row-meta{font-size:12px;color:var(--text2);margin-top:4px;line-height:1.5;}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.tag{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;font-size:11px;background:var(--surface2);color:var(--text2);}
+.tag.ok{background:var(--accent2);color:var(--accent);}
+.tag.warn{background:var(--warm2);color:var(--warm);}
+.tag.danger{background:var(--danger2);color:var(--danger);}
+.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.small{padding:8px 10px;font-size:12px;}
+.scan-wrap{display:grid;grid-template-columns:1.2fr .8fr;gap:12px;align-items:start;}
+@media (max-width:860px){.scan-wrap{grid-template-columns:1fr;}}
+#reader{width:100%;border-radius:var(--radius);overflow:hidden;border:2px solid var(--border);background:var(--surface);min-height:240px;}
+.scan-guide{font-size:14px;color:var(--text2);line-height:1.7;margin-bottom:14px;}
+.scan-hint{font-size:12px;color:var(--text3);margin-top:12px;}
+.result-box{background:rgba(255,255,255,.94);border:1px solid var(--border);border-radius:var(--radius);padding:16px;min-height:180px;}
+.call-box{font-size:54px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em;text-align:center;}
+.call-sub{text-align:center;color:var(--text3);font-size:12px;margin-top:6px;}
+.product-name{font-size:20px;font-weight:800;text-align:center;margin-top:10px;}
+.product-price{font-size:23px;font-weight:900;color:var(--accent);text-align:center;margin-top:4px;}
+.detail{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border);font-size:14px;}
+.detail:first-of-type{margin-top:14px;}
+.detail-label{color:var(--text2);}
+.detail-val{font-weight:700;}
+.notice{background:var(--danger2);border:1px solid #e8b7b3;border-radius:var(--radius-sm);padding:10px 12px;color:var(--danger);font-size:13px;line-height:1.6;text-align:center;}
+.notice-warn{background:var(--warm2);border-color:#e6d09d;color:var(--warm);}
+.choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.choice{border:2px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);padding:13px 12px;cursor:pointer;text-align:left;transition:.15s border-color,.15s transform;}
+.choice:hover,.choice.sel{border-color:var(--accent);transform:translateY(-1px);}
+.choice-emoji{font-size:28px;}
+.choice-img{width:100%;height:100px;object-fit:cover;border-radius:12px;display:block;margin-bottom:8px}
+.choice-name{font-size:15px;font-weight:800;margin-top:8px;}
+.choice-sub{font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5;}
+.daily-row{display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border);}
+.daily-row:last-child{border-bottom:none;}
+.daily-date{min-width:78px;font-size:12px;color:var(--text3);}
+.daily-chip-wrap{display:flex;flex-wrap:wrap;gap:6px;}
+.chip{font-size:11px;padding:3px 8px;border-radius:6px;background:var(--surface2);color:var(--text2);}
+.muted{color:var(--text3);font-size:12px;}
+.ai-preview{max-width:100%;border-radius:var(--radius-sm);display:none;margin-top:10px;border:1px solid var(--border);}
+.ai-status{display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;font-size:13px;color:var(--text2);margin-top:10px;}
+.ai-status.on{display:block;}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <div class="header-title">🍱 お弁当 統合システム</div>
+    <div class="header-sub">注文表の登録から受け取り確認までを1画面で管理</div>
+  </div>
+  <div id="statusPill" class="status-pill status-setup">準備中</div>
+</header>
+
+<nav class="nav">
+  <button class="nav-btn on" onclick="goTab('staff')" id="tab-staff">スタッフ入力</button>
+  <button class="nav-btn" onclick="goTab('pickup')" id="tab-pickup">受け取り確認</button>
+  <button class="nav-btn" onclick="goTab('summary')" id="tab-summary">集計</button>
+</nav>
+
+<main class="main">
+  <section class="panel on" id="panel-staff">
+    <div class="card">
+      <div class="card-title">運用メモ</div>
+      <div class="note">
+        紙の注文表からロッカー番号と注文内容だけを記録します。氏名は保持しません。<br>
+        5桁番号の中央3桁を呼び出し番号として表示し、受け取り時は5桁番号または中央3桁で照合します。<br>
+        将来データ連携がもらえれば、この手入力はそのまま置き換えられます。
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" onclick="goStaffMode('manual')" id="staff-manual-tab">手入力</button>
+      <button class="tab" onclick="goStaffMode('ai')" id="staff-ai-tab">画像読み取り</button>
+    </div>
+
+    <div id="staff-manual">
+      <div class="card">
+        <div class="card-title">注文表の1行を追加</div>
+        <div class="grid-3">
+          <div class="field">
+            <div class="label">5桁ロッカー番号</div>
+            <input class="input" id="manualLocker" placeholder="10001" inputmode="numeric" oninput="syncCallCode()"/>
+          </div>
+          <div class="field">
+            <div class="label">中央3桁</div>
+            <input class="input" id="manualCall" placeholder="001" readonly/>
+          </div>
+          <!-- 時刻は不要に簡素化 -->
+          <div class="field">
+            <div class="label">弁当</div>
+            <select class="select" id="manualBento" onchange="syncRiceByBento()">
+              <option value="wa">和食</option>
+              <option value="morning">モーニング（コーヒー選択可）</option>
+              <option value="morning_set">モーニングセット（コーヒー付）</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="label">個数</div>
+            <input class="input" id="manualQty" type="number" min="1" step="1" value="1"/>
+          </div>
+          <!-- ご飯量は自動または不要に簡素化 -->
+          <!-- アレルギー／メモは不要に簡素化 -->
+        </div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn-primary" onclick="addManualOrder()">この行を追加</button>
+          <button class="btn-secondary" onclick="fillFromExample()">例を入れる</button>
+        </div>
+        <div class="helper">入力した注文はそのまま受け取り確認に反映されます。氏名は保存しません。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">読み込み済み注文</div>
+        <div id="staffList" class="list"></div>
+        <div id="staffEmpty" class="muted" style="display:none;">まだ注文がありません。</div>
+      </div>
+
+      <div class="card">
+        <div class="kpi-grid" id="staffKpis"></div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn-primary" onclick="startDay()">受け取り受付を開始</button>
+          <button class="btn-ghost" onclick="clearAllOrders()">全件クリア</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="staff-ai" style="display:none;">
+      <div class="card">
+        <div class="card-title">注文表の写真を読み取る</div>
+        <div class="note">画像から注文表の行をJSON配列で読み取る想定です。個人情報は不要で、ロッカー番号と注文内容だけを取り出します。</div>
+        <div style="margin-top:12px;" class="btn-row">
+          <button class="btn-secondary" onclick="document.getElementById('aiFile').click()">写真を選ぶ</button>
+          <button class="btn-primary" id="aiParseBtn" onclick="parseImage()" disabled>AIで読み取る</button>
+        </div>
+        <input id="aiFile" type="file" accept="image/*" style="display:none" onchange="onAiFile(event)"/>
+        <img id="aiPreview" class="ai-preview" alt="preview"/>
+        <div id="aiStatus" class="ai-status"></div>
+      </div>
+      <div class="card" id="aiEditCard" style="display:none;">
+        <div class="card-title">読み取り結果</div>
+        <div id="aiList" class="list"></div>
+        <div class="kpi-grid" id="aiKpis" style="margin-top:12px;"></div>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn-primary" onclick="startDay()">受け取り受付を開始</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-pickup">
+    <div class="scan-wrap">
+      <div class="card">
+        <div class="card-title">バーコード読み取り</div>
+        <p class="scan-guide">腕のロッカーキーのバーコードをカメラに向けてください。<br>5桁番号でも中央3桁でも照合できます。</p>
+        <div id="reader"></div>
+        <p class="scan-hint">自動で読み取ります。カメラが使えない場合は下の手入力を使ってください。</p>
+        <div class="btn-row" style="margin-top:12px;">
+          <button class="btn-secondary" onclick="toggleManualInput()">手入力を表示</button>
+          <button class="btn-ghost" onclick="restartPickup()">受付を最初から</button>
+        </div>
+        <div id="manualWrap" style="display:none;margin-top:12px;">
+          <div class="grid-2">
+            <div class="field">
+              <div class="label">番号入力</div>
+              <input class="input" id="scanInput" placeholder="10001 / 001" onkeydown="if(event.key==='Enter')doScan()"/>
+            </div>
+            <div class="field">
+              <div class="label">操作</div>
+              <button class="btn-primary" onclick="doScan()">確認</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">受け取り結果</div>
+        <div id="pickupResult" class="result-box">
+          <div class="muted" style="text-align:center;padding-top:42px;">スキャン待機中...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">受付ログ</div>
+      <div id="pickupLog" class="list"><div class="muted">まだスキャンなし</div></div>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-summary">
+    <div class="card">
+      <div class="card-title">今の集計</div>
+      <div class="kpi-grid" id="liveKpis"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">品目別 残数</div>
+      <div id="itemList" class="list"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">未受取</div>
+      <div id="waitingList" class="list"></div>
+      <div id="waitingAlert" class="notice notice-warn" style="display:none;margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">日別記録</div>
+      <div id="dailyList" class="list"><div class="muted">まだ記録なし</div></div>
+      <div class="helper">保存するのは日別の件数と集計だけです。ロッカー番号は日次締めで消せます。</div>
+    </div>
+  </section>
+</main>
+
+<script>
+const BENTO_INFO = {
+  morning_set: { label: 'モーニングセット（コーヒー付）', price: 600, emoji: '🥪', rice: 0, needsCoffee: true, img: 'assets/morning_set.jpg' },
+  morning:     { label: 'モーニング（単品）', price: 500, emoji: '🥐', rice: 0, needsCoffee: true, img: 'assets/morning.jpg' },
+  wa:          { label: '和食セット', price: 600, emoji: '🍱', rice: 200, needsCoffee: false, img: 'assets/wa.jpg' },
+  natto:       { label: '納豆（単品）', price: 70,  emoji: '🫙', rice: 0, needsCoffee: false, img: 'assets/natto.jpg' },
+  coffee_only: { label: 'モーニングコーヒー', price: 300, emoji: '☕', rice: 0, needsCoffee: false, img: 'assets/coffee.jpg' }
+};
+
+const ORDERS = [];
+const DAILY_LOG = [];
+const PICKUP_LOG = [];
+let currentTab = 'staff';
+let staffMode = 'manual';
+let activeDay = false;
+let currentOrder = null;
+let currentLocker = '';
+let sameDaySeq = 1;
+let html5QrCode = null;
+let aiImageBase64 = null;
+
+function normalizeDigits(value){
+  return String(value || '').replace(/\D/g, '');
+}
+
+function todayLabel(){
+  const d = new Date();
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${['日','月','火','水','木','金','土'][d.getDay()]}）`;
+}
+
+function callCodeFromFull(full){
+  const digits = normalizeDigits(full);
+  if(digits.length >= 5) return digits.slice(1, 4);
+  if(digits.length >= 3) return digits.slice(-3);
+  return digits.padStart(3, '0');
+}
+
+function fullCodeFromInput(value){
+  const digits = normalizeDigits(value);
+  return digits;
+}
+
+function getBentoLabel(bento){
+  return BENTO_INFO[bento]?.label || '不明';
+}
+
+function getOrderRice(order){
+  return order.rice || BENTO_INFO[order.bento]?.rice || 0;
+}
+
+function getQuantity(order){
+  return Math.max(1, Number(order.quantity || 1));
+}
+
+function countOrders(list = ORDERS){
+  return list.reduce((sum, order) => sum + getQuantity(order), 0);
+}
+
+function summarizeOrders(list = ORDERS){
+  const summary = {
+    total: 0,
+    served: 0,
+    remain: 0,
+    rice: 0,
+    revenue: 0,
+    wa: 0,
+    morning: 0,
+    morning_set: 0,
+    coffee: 0,
+  };
+  list.forEach(order => {
+    const qty = getQuantity(order);
+    summary.total += qty;
+    summary.rice += getOrderRice(order) * qty;
+    summary[order.bento] = (summary[order.bento] || 0) + qty;
+    const unit = Number(order.price || BENTO_INFO[order.bento]?.price || 0);
+    summary.revenue += unit * qty;
+    if(order.coffee === true) summary.coffee += qty;
+    if(order.served) summary.served += qty;
+  });
+  summary.remain = summary.total - summary.served;
+  return summary;
+}
+
+function goTab(name){
+  currentTab = name;
+  document.getElementById('panel-staff').classList.toggle('on', name === 'staff');
+  document.getElementById('panel-pickup').classList.toggle('on', name === 'pickup');
+  document.getElementById('panel-summary').classList.toggle('on', name === 'summary');
+  document.getElementById('tab-staff').classList.toggle('on', name === 'staff');
+  document.getElementById('tab-pickup').classList.toggle('on', name === 'pickup');
+  document.getElementById('tab-summary').classList.toggle('on', name === 'summary');
+  if(name === 'pickup') startScanner(); else stopScanner();
+  if(name === 'summary') renderSummary();
+}
+
+function goStaffMode(mode){
+  staffMode = mode;
+  document.getElementById('staff-manual').style.display = mode === 'manual' ? '' : 'none';
+  document.getElementById('staff-ai').style.display = mode === 'ai' ? '' : 'none';
+  document.getElementById('staff-manual-tab').classList.toggle('on', mode === 'manual');
+  document.getElementById('staff-ai-tab').classList.toggle('on', mode === 'ai');
+}
+
+function syncCallCode(){
+  const full = fullCodeFromInput(document.getElementById('manualLocker').value);
+  document.getElementById('manualCall').value = callCodeFromFull(full);
+  // 時刻自動入力は不要になったため削除
+}
+
+function syncRiceByBento(){
+  const bento = document.getElementById('manualBento').value;
+  const el = document.getElementById('manualRice');
+  if(el) el.value = BENTO_INFO[bento]?.rice || 0;
+}
+
+function fillFromExample(){
+  const sample = ORDERS.length + 1;
+  const locker = String(10000 + sample).slice(-5);
+  document.getElementById('manualLocker').value = locker;
+  const keys = Object.keys(BENTO_INFO);
+  document.getElementById('manualBento').value = keys[sample % keys.length];
+  document.getElementById('manualQty').value = 1;
+  syncCallCode();
+  syncRiceByBento();
+}
+
+async function addManualOrder(){
+  const lockerFull = fullCodeFromInput(document.getElementById('manualLocker').value);
+  if(lockerFull.length < 5){
+    alert('5桁のロッカー番号を入力してください。');
+    return;
+  }
+  const bento = document.getElementById('manualBento').value;
+  const quantity = Math.max(1, Number(document.getElementById('manualQty').value || 1));
+  const price = Number(BENTO_INFO[bento]?.price || 0);
+  const order = {
+    lockerFull,
+    callCode: callCodeFromFull(lockerFull),
+    bento,
+    price,
+    rice: BENTO_INFO[bento]?.rice || 0,
+    quantity,
+    source: 'manual',
+    coffee: BENTO_INFO[bento]?.needsCoffee ? null : false,
+    createdAt: new Date().toISOString()
+  };
+
+  try {
+    const response = await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(order)
+    });
+    if(!response.ok){
+      const err = await response.json().catch(() => ({}));
+      alert(err.error || '追加に失敗しました');
+      return;
+    }
+  } catch(error) {
+    console.error('API Error:', error);
+    alert('サーバー接続エラー。ローカル表示のみで続行します。');
+  }
+
+  ORDERS.push(order);
+  document.getElementById('manualLocker').value = '';
+  document.getElementById('manualCall').value = '';
+  document.getElementById('manualQty').value = 1;
+  syncRiceByBento();
+  renderAll();
+}
+
+function renderStaffOrders(){
+  const list = document.getElementById('staffList');
+  const empty = document.getElementById('staffEmpty');
+  if(!ORDERS.length){
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  list.innerHTML = ORDERS.map((order, index) => {
+    const qty = getQuantity(order);
+    return `<div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code">${order.callCode}</div>
+          <div class="row-sub">ロッカー番号 ${order.lockerFull}</div>
+        </div>
+        <div class="tag ${order.served ? 'ok' : 'warn'}">${order.served ? '受取済み' : '未受取'}</div>
+      </div>
+      <div class="row-title">${getBentoLabel(order.bento)}</div>
+      <div class="row-meta">個数 ${qty} / 小計 ¥${(order.price || BENTO_INFO[order.bento]?.price || 0) * qty}</div>
+      <div class="tags">
+        <span class="tag">${order.source === 'ai' ? '画像読み取り' : order.source === 'same-day' ? '当日注文' : '手入力'}</span>
+        ${order.bento === 'morning' && order.coffee === null ? '<span class="tag ok">コーヒー選択待ち</span>' : ''}
+        ${order.bento === 'morning_set' || order.coffee === true ? '<span class="tag">コーヒー付き</span>' : ''}
+        ${order.coffee === false ? '<span class="tag">コーヒーなし</span>' : ''}
+      </div>
+      <div class="actions">
+        <button class="btn-secondary small" onclick="deleteOrder(${index})">削除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function deleteOrder(index){
+  const order = ORDERS[index];
+  if(!order) return;
+  try {
+    const response = await fetch(`/api/orders/${order.lockerFull}`, { method: 'DELETE' });
+    if(!response.ok) {
+      alert('削除に失敗しました');
+      return;
+    }
+    ORDERS.splice(index, 1);
+    renderAll();
+  } catch(error) {
+    console.error('API Error:', error);
+    ORDERS.splice(index, 1);
+    renderAll();
+  }
+}
+
+function clearAllOrders(){
+  if(!confirm('登録済みの注文をすべて消しますか？')) return;
+  ORDERS.length = 0;
+  PICKUP_LOG.length = 0;
+  currentOrder = null;
+  currentLocker = '';
+  activeDay = false;
+  sameDaySeq = 1;
+  document.getElementById('statusPill').textContent = '準備中';
+  document.getElementById('statusPill').className = 'status-pill status-setup';
+  renderAll();
+}
+
+function updateDailyLog(){
+  const snapshot = {
+    date: todayLabel(),
+    summary: summarizeOrders(),
+  };
+  DAILY_LOG.length = 0;
+  DAILY_LOG.push(snapshot);
+}
+
+function renderStaffKpis(){
+  const summary = summarizeOrders();
+  document.getElementById('staffKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-n">${summary.total}</div><div class="kpi-l">総個数</div></div>
+    <div class="kpi"><div class="kpi-n">¥${summary.revenue || 0}</div><div class="kpi-l">売上見込</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.rice}g</div><div class="kpi-l">ご飯必要量</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.wa}</div><div class="kpi-l">和食</div></div>`;
+}
+
+function renderAiKpis(){
+  const summary = summarizeOrders();
+  document.getElementById('aiKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-n">${summary.total}</div><div class="kpi-l">総個数</div></div>
+    <div class="kpi"><div class="kpi-n">¥${summary.revenue || 0}</div><div class="kpi-l">売上見込</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.wa}</div><div class="kpi-l">和食</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.morning + summary.morning_set || 0}</div><div class="kpi-l">朝メニュー合計</div></div>`;
+}
+
+function renderSummary(){
+  const summary = summarizeOrders();
+  document.getElementById('liveKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-n">${summary.total}</div><div class="kpi-l">総個数</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.served}</div><div class="kpi-l">受取済み</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.remain}</div><div class="kpi-l">未受取</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.rice}g</div><div class="kpi-l">必要ご飯量</div></div>`;
+
+  const itemRows = [
+    { key:'wa', label:'和食' },
+    { key:'morning_set', label:'モーニングセット（コーヒー付）' },
+    { key:'morning', label:'モーニング（単品）' },
+  ].map(item => {
+    const total = ORDERS.filter(o => o.bento === item.key).reduce((sum, o) => sum + getQuantity(o), 0);
+    const remain = ORDERS.filter(o => o.bento === item.key && !o.served).reduce((sum, o) => sum + getQuantity(o), 0);
+    const rice = ORDERS.filter(o => o.bento === item.key && !o.served).reduce((sum, o) => sum + getOrderRice(o) * getQuantity(o), 0);
+    return `<div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-title">${item.label}</div>
+          <div class="row-meta">残ご飯 ${rice}g</div>
+        </div>
+        <div class="row-code" style="font-size:30px;">${remain}<span class="muted">/${total}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('itemList').innerHTML = itemRows || '<div class="muted">まだ注文がありません。</div>';
+
+  const waiting = ORDERS.filter(o => !o.served);
+  document.getElementById('waitingList').innerHTML = waiting.length ? waiting.map(order => `
+    <div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code" style="font-size:26px;">${order.callCode}</div>
+          <div class="row-sub">${order.lockerFull}</div>
+        </div>
+        <div class="tag ok">未受取</div>
+      </div>
+      <div class="row-title">${getBentoLabel(order.bento)}</div>
+    </div>
+  `).join('') : '<div class="muted">全員受取済みです。</div>';
+  // アレルギー情報は削除されたため警告は不要
+
+  document.getElementById('dailyList').innerHTML = DAILY_LOG.length ? DAILY_LOG.map(day => `
+    <div class="daily-row">
+      <div class="daily-date">${day.date}</div>
+      <div class="daily-chip-wrap">
+        <span class="chip">総個数 ${day.summary.total}</span>
+        <span class="chip">受取済み ${day.summary.served}</span>
+        <span class="chip">未受取 ${day.summary.remain}</span>
+        <span class="chip">和食 ${day.summary.wa}</span>
+        <span class="chip">朝メニュー ${day.summary.morning + day.summary.morning_set}</span>
+      </div>
+    </div>
+  `).join('') : '<div class="muted">まだ記録なし</div>';
+}
+
+function renderAll(){
+  renderStaffOrders();
+  renderStaffKpis();
+  renderAiKpis();
+  updateDailyLog();
+  if(currentTab === 'summary') renderSummary();
+}
+
+function startDay(){
+  if(!ORDERS.length){
+    alert('まず注文を登録してください。');
+    return;
+  }
+  activeDay = true;
+  document.getElementById('statusPill').textContent = '営業中';
+  document.getElementById('statusPill').className = 'status-pill status-running';
+  renderAll();
+  goTab('pickup');
+}
+
+function stopScanner(){
+  if(html5QrCode){
+    html5QrCode.stop().catch(() => {});
+    html5QrCode = null;
+  }
+}
+
+function startScanner(){
+  const reader = document.getElementById('reader');
+  if(!reader) return;
+  if(html5QrCode) return;
+  try{
+    html5QrCode = new Html5Qrcode('reader');
+    const config = { fps: 10, qrbox: { width: 250, height: 160 }, aspectRatio: 1.5 };
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      config,
+      decodedText => {
+        const code = normalizeDigits(decodedText);
+        if(code){
+          stopScanner();
+          processPickup(code);
+        }
+      },
+      () => {}
+    ).catch(() => {
+      reader.innerHTML = '<div class="note" style="margin:12px;">カメラにアクセスできません。下の手入力を使ってください。</div>';
+    });
+  }catch(error){
+    reader.innerHTML = '<div class="note" style="margin:12px;">カメラ起動に失敗しました。手入力を使ってください。</div>';
+  }
+}
+
+function toggleManualInput(){
+  const wrap = document.getElementById('manualWrap');
+  wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+}
+
+function findOrderByCode(code){
+  return ORDERS.find(order => !order.served && (order.lockerFull === code || order.callCode === code));
+}
+
+function findAnyOrder(code){
+  return ORDERS.find(order => order.lockerFull === code || order.callCode === code);
+}
+
+function processPickup(code){
+  currentLocker = code;
+  currentOrder = null;
+  const order = findOrderByCode(code);
+  const box = document.getElementById('pickupResult');
+  if(!activeDay){
+    box.innerHTML = '<div class="notice">先にスタッフ入力で「受け取り受付を開始」を押してください。</div>';
+    return;
+  }
+  if(!order){
+    const already = findAnyOrder(code);
+    box.innerHTML = already ? '<div class="notice notice-warn">すでに受取済みです。</div>' : '<div class="notice">注文が見つかりません。</div>';
+    renderPickupLog();
+    return;
+  }
+  currentOrder = order;
+  order.served = true;
+  const displayCode = order.callCode || callCodeFromFull(order.lockerFull);
+  box.innerHTML = `
+    <div class="call-box">${displayCode}</div>
+    <div class="call-sub">ロッカー番号 ${order.lockerFull}</div>
+    <div class="product-name">${getBentoLabel(order.bento)}</div>
+    <div class="product-price">${BENTO_INFO[order.bento]?.price || ''}</div>
+    <div class="detail"><span class="detail-label">個数</span><span class="detail-val">${getQuantity(order)}個</span></div>
+    <div class="detail"><span class="detail-label">ご飯の量</span><span class="detail-val">${getOrderRice(order)}g</span></div>
+    ${(order.bento === 'morning' || order.bento === 'morning_set') ? `<div class="detail"><span class="detail-label">コーヒー</span><span class="detail-val">${order.coffee === true ? 'コーヒー付き' : order.coffee === false ? 'なし' : '選択中'}</span></div>` : ''}
+  `;
+  PICKUP_LOG.unshift({
+    code: displayCode,
+    locker: order.lockerFull,
+    bento: getBentoLabel(order.bento),
+    time: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'})
+  });
+  renderPickupLog();
+  renderAll();
+}
+
+function doScan(){
+  const code = normalizeDigits(document.getElementById('scanInput').value);
+  if(!code) return;
+  processPickup(code);
+  document.getElementById('scanInput').value = '';
+}
+
+function renderPickupLog(){
+  const el = document.getElementById('pickupLog');
+  if(!PICKUP_LOG.length){
+    el.innerHTML = '<div class="muted">まだスキャンなし</div>';
+    return;
+  }
+  el.innerHTML = PICKUP_LOG.map((item, index) => `
+    <div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code" style="font-size:24px;">#${index + 1} ${item.code}</div>
+          <div class="row-sub">${item.locker}</div>
+        </div>
+        <div class="muted">${item.time}</div>
+      </div>
+      <div class="row-title">${item.bento}</div>
+    </div>
+  `).join('');
+}
+
+function restartPickup(){
+  currentOrder = null;
+  currentLocker = '';
+  document.getElementById('pickupResult').innerHTML = '<div class="muted" style="text-align:center;padding-top:42px;">スキャン待機中...</div>';
+  document.getElementById('scanInput').value = '';
+  document.getElementById('manualWrap').style.display = 'none';
+  stopScanner();
+  startScanner();
+}
+
+function resetPickupOnly(){
+  currentOrder = null;
+  currentLocker = '';
+  document.getElementById('pickupResult').innerHTML = '<div class="muted" style="text-align:center;padding-top:42px;">スキャン待機中...</div>';
+}
+
+function chooseCoffee(withCoffee){
+  if(!currentOrder) return;
+  currentOrder.coffee = withCoffee;
+  if(currentOrder && currentOrder.bento === 'morning'){
+    // コーヒーを付ける場合はモーニングセットに変更
+    if(withCoffee){
+      currentOrder.bento = 'morning_set';
+      currentOrder.price = Number(BENTO_INFO['morning_set'].price || currentOrder.price || 0);
+    }
+    processPickup(currentOrder.lockerFull || currentLocker);
+  }
+}
+
+function showCoffeePrompt(){
+  // kept for compatibility with same-day flow
+}
+
+function onAiFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    aiImageBase64 = e.target.result.split(',')[1];
+    const img = document.getElementById('aiPreview');
+    img.src = e.target.result;
+    img.style.display = 'block';
+    document.getElementById('aiParseBtn').disabled = false;
+    document.getElementById('aiStatus').className = 'ai-status';
+    document.getElementById('aiEditCard').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function parseImage(){
+  const status = document.getElementById('aiStatus');
+  const button = document.getElementById('aiParseBtn');
+  button.disabled = true;
+  status.className = 'ai-status on';
+  status.textContent = '読み取り中...';
+  try{
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 700,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: aiImageBase64 } },
+            { type: 'text', text: 'この画像は温泉施設のお弁当注文表です。JSON配列だけで返してください。各行は {"lockerFull":"10001","bento":"wa|morning|morning_set","quantity":1,"rice":200} の形にしてください。読み取れない項目は空欄か0にしてください。前置きや説明文は不要です。' }
+          ]
+        }]
+      })
+    });
+    const data = await response.json();
+    const rawText = (data.content || []).map(item => item.text || '').join('');
+    const jsonText = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(jsonText);
+    const items = Array.isArray(parsed) ? parsed : parsed.orders || [];
+    ORDERS.length = 0;
+    items.forEach(item => {
+      const lockerFull = fullCodeFromInput(item.lockerFull || item.locker || '');
+      if(!lockerFull) return;
+      const bento = item.bento === 'morning_set' ? 'morning_set' : item.bento === 'morning' ? 'morning' : 'wa';
+      ORDERS.push({
+        lockerFull,
+        callCode: callCodeFromFull(lockerFull),
+        bento,
+        price: Number(BENTO_INFO[bento]?.price || 0),
+        rice: Number(item.rice || BENTO_INFO[bento].rice),
+        quantity: Math.max(1, Number(item.quantity || 1)),
+        served: false,
+        source: 'ai',
+        coffee: bento === 'morning_set' ? true : bento === 'morning' ? null : false,
+      });
+    });
+    document.getElementById('aiStatus').textContent = '読み取り完了。内容を確認してください。';
+    document.getElementById('aiEditCard').style.display = 'block';
+    renderStaffOrders();
+    renderStaffKpis();
+    renderAiKpis();
+    updateDailyLog();
+  }catch(error){
+    status.textContent = '読み取り失敗。手入力で登録してください。';
+  }
+  button.disabled = false;
+}
+
+function renderAiList(){
+  document.getElementById('aiList').innerHTML = ORDERS.map((order, index) => `
+    <div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code">${order.callCode}</div>
+          <div class="row-sub">${order.lockerFull}</div>
+        </div>
+        <div class="tag">${order.source === 'ai' ? '画像読み取り' : '手入力'}</div>
+      </div>
+      <div class="row-title">${getBentoLabel(order.bento)}</div>
+      <div class="row-meta">個数 ${getQuantity(order)} / ご飯 ${getOrderRice(order)}g</div>
+      <div class="actions"><button class="btn-secondary small" onclick="deleteOrder(${index})">削除</button></div>
+    </div>
+  `).join('') || '<div class="muted">まだ注文がありません。</div>';
+}
+
+function startDaySnapshot(){
+  updateDailyLog();
+  document.getElementById('statusPill').textContent = '営業中';
+  document.getElementById('statusPill').className = 'status-pill status-running';
+  activeDay = true;
+  renderAll();
+  goTab('pickup');
+}
+
+function startDay(){
+  if(!ORDERS.length){
+    alert('まず注文を登録してください。');
+    return;
+  }
+  startDaySnapshot();
+}
+
+function createSameDayOrder(bento){
+  const lockerFull = `SD${String(sameDaySeq++).padStart(4, '0')}`;
+  const order = {
+    lockerFull,
+    callCode: '当日',
+    bento,
+    rice: BENTO_INFO[bento].rice,
+    price: Number(BENTO_INFO[bento].price || 0),
+    quantity: 1,
+    served: false,
+    source: 'same-day',
+    coffee: bento === 'morning' ? null : false,
+  };
+  ORDERS.push(order);
+  currentOrder = order;
+  currentLocker = lockerFull;
+  return order;
+}
+
+function renderCoffeeChoice(){
+  return `
+    <div class="card">
+      <div class="card-title">コーヒーはいかがですか？</div>
+      <div class="note">モーニングにはコーヒーを追加できます。</div>
+      <div class="choice-grid" style="margin-top:12px;">
+        <div class="choice" onclick="chooseCoffee(true)">
+          <div class="choice-emoji">☕</div>
+          <div class="choice-name">コーヒーをつける</div>
+          <div class="choice-sub">ホットコーヒー付き（+¥150）</div>
+        </div>
+        <div class="choice" onclick="chooseCoffee(false)">
+          <div class="choice-emoji">🚫</div>
+          <div class="choice-name">コーヒーなし</div>
+          <div class="choice-sub">お弁当のみ</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function processSameDaySelection(bento){
+  const order = createSameDayOrder(bento);
+  if(bento === 'morning'){
+    document.getElementById('pickupResult').innerHTML = `
+      <div class="call-box">${order.callCode}</div>
+      <div class="call-sub">当日注文</div>
+      <div class="product-name">${getBentoLabel(order.bento)}</div>
+      <div class="product-price">${BENTO_INFO[order.bento].price}</div>
+      <div class="detail"><span class="detail-label">個数</span><span class="detail-val">1個</span></div>
+      ${renderCoffeeChoice()}
+    `;
+  }else{
+    document.getElementById('pickupResult').innerHTML = `
+      <div class="call-box">${order.callCode}</div>
+      <div class="call-sub">当日注文</div>
+      <div class="product-name">${getBentoLabel(order.bento)}</div>
+      <div class="product-price">${BENTO_INFO[order.bento].price}</div>
+      <div class="detail"><span class="detail-label">個数</span><span class="detail-val">1個</span></div>
+      <div class="detail"><span class="detail-label">ご飯の量</span><span class="detail-val">${order.rice}g</span></div>
+    `;
+    order.served = true;
+    PICKUP_LOG.unshift({
+      code: order.callCode,
+      locker: order.lockerFull,
+      bento: getBentoLabel(order.bento),
+      time: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'})
+    });
+    renderPickupLog();
+    renderAll();
+  }
+}
+
+function selectSameDay(bento){
+  processSameDaySelection(bento);
+}
+
+function confirmSameDayCoffee(withCoffee){
+  if(!currentOrder) return;
+  currentOrder.coffee = withCoffee;
+  // コーヒーを付ける場合はモーニングセットに置き換え
+  if(withCoffee){
+    currentOrder.bento = 'morning_set';
+    currentOrder.price = Number(BENTO_INFO['morning_set'].price || currentOrder.price || 0);
+  } else {
+    currentOrder.bento = 'morning';
+    currentOrder.price = Number(BENTO_INFO['morning'].price || currentOrder.price || 0);
+  }
+  currentOrder.served = true;
+  document.getElementById('pickupResult').innerHTML = `
+    <div class="call-box">${currentOrder.callCode}</div>
+    <div class="call-sub">当日注文</div>
+    <div class="product-name">${getBentoLabel(currentOrder.bento)}</div>
+    <div class="product-price">${BENTO_INFO[currentOrder.bento].price}</div>
+    <div class="detail"><span class="detail-label">個数</span><span class="detail-val">1個</span></div>
+    <div class="detail"><span class="detail-label">コーヒー</span><span class="detail-val">${withCoffee ? 'コーヒー付き' : 'なし'}</span></div>
+  `;
+  PICKUP_LOG.unshift({
+    code: currentOrder.callCode,
+    locker: currentOrder.lockerFull,
+    bento: getBentoLabel(currentOrder.bento),
+    time: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'})
+  });
+  renderPickupLog();
+  renderAll();
+}
+
+function showNotFound(code){
+  const wa = BENTO_INFO['wa'];
+  const mo = BENTO_INFO['morning'];
+  document.getElementById('pickupResult').innerHTML = `
+    <div class="notice">番号「${code}」の注文は見つかりませんでした。注文しますか？</div>
+    <div class="card" style="margin-top:12px;">
+      <div class="card-title">当日注文</div>
+      <div class="choice-grid">
+        <div class="choice" onclick="selectSameDay('wa')">
+          ${wa.img ? `<img class="choice-img" src="${wa.img}" alt="${wa.label}">` : '<div class="choice-emoji">🍱</div>'}
+          <div class="choice-name">${wa.label}</div>
+          <div class="choice-sub">¥${wa.price}</div>
+        </div>
+        <div class="choice" onclick="selectSameDay('morning')">
+          ${mo.img ? `<img class="choice-img" src="${mo.img}" alt="${mo.label}">` : '<div class="choice-emoji">🥐</div>'}
+          <div class="choice-name">${mo.label}</div>
+          <div class="choice-sub">コーヒー選択可</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function chooseCoffee(withCoffee){
+  if(!currentOrder) return;
+  if(currentOrder.bento !== 'morning') return;
+  confirmSameDayCoffee(withCoffee);
+}
+
+function showOrder(order){
+  const displayCode = order.callCode || callCodeFromFull(order.lockerFull);
+  const product = BENTO_INFO[order.bento];
+  document.getElementById('pickupResult').innerHTML = `
+    <div class="call-box">${displayCode}</div>
+    <div class="call-sub">ロッカー番号 ${order.lockerFull}</div>
+    <div class="product-name">${product.label}</div>
+    <div class="product-price">${product.price}</div>
+    <div class="detail"><span class="detail-label">個数</span><span class="detail-val">${getQuantity(order)}個</span></div>
+    <div class="detail"><span class="detail-label">ご飯の量</span><span class="detail-val">${getOrderRice(order)}g</span></div>
+    ${(order.bento === 'morning' || order.bento === 'morning_set') ? `<div class="detail"><span class="detail-label">コーヒー</span><span class="detail-val">${order.coffee === true ? 'コーヒー付き' : order.coffee === false ? 'なし' : '選択中'}</span></div>` : ''}
+  `;
+}
+
+async function pickupOrderByCode(code){
+  if(!activeDay){
+    document.getElementById('pickupResult').innerHTML = '<div class="notice">先にスタッフ入力で「受け取り受付を開始」を押してください。</div>';
+    return;
+  }
+  const order = ORDERS.find(item => !item.served && (item.lockerFull === code || item.callCode === code));
+  if(!order){
+    const already = ORDERS.find(item => item.lockerFull === code || item.callCode === code);
+    document.getElementById('pickupResult').innerHTML = already ? '<div class="notice notice-warn">すでに受取済みです。</div>' : '';
+    if(!already) showNotFound(code);
+    renderPickupLog();
+    renderSummary();
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/orders/${order.lockerFull}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ served: 1 })
+    });
+    if(!response.ok) {
+      throw new Error('Update failed');
+    }
+    // API成功後、メモリを更新
+    order.served = true;
+    const pickupTime = new Date().toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'});
+    await fetch('/api/pickup-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: order.callCode || callCodeFromFull(order.lockerFull),
+        locker: order.lockerFull,
+        bento: getBentoLabel(order.bento),
+        time: pickupTime
+      })
+    });
+  } catch(error) {
+    console.error('API Error:', error);
+    order.served = true; // ローカルで続行
+  }
+  
+  currentOrder = order;
+  currentLocker = code;
+  showOrder(order);
+  PICKUP_LOG.unshift({
+    code: order.callCode || callCodeFromFull(order.lockerFull),
+    locker: order.lockerFull,
+    bento: getBentoLabel(order.bento),
+    time: new Date().toLocaleTimeString('ja-JP', {hour:'2-digit', minute:'2-digit'})
+  });
+  renderPickupLog();
+  renderAll();
+}
+
+function doScan(){
+  const code = normalizeDigits(document.getElementById('scanInput').value);
+  if(!code) return;
+  pickupOrderByCode(code);
+  document.getElementById('scanInput').value = '';
+}
+
+function renderPickupLog(){
+  const el = document.getElementById('pickupLog');
+  if(!PICKUP_LOG.length){
+    el.innerHTML = '<div class="muted">まだスキャンなし</div>';
+    return;
+  }
+  el.innerHTML = PICKUP_LOG.map((item, index) => `
+    <div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code" style="font-size:24px;">#${index + 1} ${item.code}</div>
+          <div class="row-sub">${item.locker}</div>
+        </div>
+        <div class="muted">${item.time}</div>
+      </div>
+      <div class="row-title">${item.bento}</div>
+    </div>
+  `).join('');
+}
+
+function toggleManualInput(){
+  const wrap = document.getElementById('manualWrap');
+  wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+}
+
+function stopScanner(){
+  if(html5QrCode){
+    html5QrCode.stop().catch(() => {});
+    html5QrCode = null;
+  }
+}
+
+function startScanner(){
+  if(html5QrCode) return;
+  const reader = document.getElementById('reader');
+  if(!reader) return;
+  try{
+    html5QrCode = new Html5Qrcode('reader');
+    const config = { fps: 10, qrbox: { width: 250, height: 160 }, aspectRatio: 1.5 };
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      config,
+      decodedText => {
+        const code = normalizeDigits(decodedText);
+        if(code){
+          stopScanner();
+          pickupOrderByCode(code);
+        }
+      },
+      () => {}
+    ).catch(() => {
+      reader.innerHTML = '<div class="note" style="margin:12px;">カメラにアクセスできません。手入力を使ってください。</div>';
+    });
+  }catch(error){
+    reader.innerHTML = '<div class="note" style="margin:12px;">カメラ起動に失敗しました。手入力を使ってください。</div>';
+  }
+}
+
+function restartPickup(){
+  currentOrder = null;
+  currentLocker = '';
+  document.getElementById('pickupResult').innerHTML = '<div class="muted" style="text-align:center;padding-top:42px;">スキャン待機中...</div>';
+  document.getElementById('scanInput').value = '';
+  document.getElementById('manualWrap').style.display = 'none';
+  stopScanner();
+  startScanner();
+}
+
+function onAiFile(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    aiImageBase64 = e.target.result.split(',')[1];
+    document.getElementById('aiPreview').src = e.target.result;
+    document.getElementById('aiPreview').style.display = 'block';
+    document.getElementById('aiParseBtn').disabled = false;
+    document.getElementById('aiStatus').className = 'ai-status';
+    document.getElementById('aiEditCard').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function parseImage(){
+  const status = document.getElementById('aiStatus');
+  const button = document.getElementById('aiParseBtn');
+  button.disabled = true;
+  status.className = 'ai-status on';
+  status.textContent = '読み取り中...';
+  try{
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 700,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: aiImageBase64 } },
+            { type: 'text', text: 'この画像は温泉施設のお弁当注文表です。JSON配列だけで返してください。各行は {"lockerFull":"10001","bento":"wa|morning|morning_set","quantity":1,"rice":200} の形にしてください。前置きや説明文は不要です。' }
+          ]
+        }]
+      })
+    });
+    const data = await response.json();
+    const rawText = (data.content || []).map(item => item.text || '').join('');
+    const jsonText = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(jsonText);
+    const items = Array.isArray(parsed) ? parsed : parsed.orders || [];
+    ORDERS.length = 0;
+    items.forEach(item => {
+      const lockerFull = fullCodeFromInput(item.lockerFull || item.locker || '');
+      if(!lockerFull) return;
+      const bento = item.bento === 'morning_set' ? 'morning_set' : item.bento === 'morning' ? 'morning' : 'wa';
+      ORDERS.push({
+        lockerFull,
+        callCode: callCodeFromFull(lockerFull),
+        bento,
+        price: Number(BENTO_INFO[bento]?.price || 0),
+        rice: Number(item.rice || BENTO_INFO[bento].rice),
+        quantity: Math.max(1, Number(item.quantity || 1)),
+        served: false,
+        source: 'ai',
+        coffee: bento === 'morning_set' ? true : bento === 'morning' ? null : false,
+      });
+    });
+    status.textContent = '読み取り完了。内容を確認してください。';
+    document.getElementById('aiEditCard').style.display = 'block';
+    renderAll();
+  }catch(error){
+    status.textContent = '読み取り失敗。手入力で登録してください。';
+  }
+  button.disabled = false;
+}
+
+function startDay(){
+  if(!ORDERS.length){
+    alert('まず注文を登録してください。');
+    return;
+  }
+  activeDay = true;
+  document.getElementById('statusPill').textContent = '営業中';
+  document.getElementById('statusPill').className = 'status-pill status-running';
+  updateDailyLog();
+  renderAll();
+  goTab('pickup');
+}
+
+function updateRunState(){
+  const summary = summarizeOrders();
+  document.getElementById('statusPill').textContent = activeDay ? '営業中' : '準備中';
+  document.getElementById('statusPill').className = activeDay ? 'status-pill status-running' : 'status-pill status-setup';
+  if(summary.total === 0) document.getElementById('statusPill').textContent = '準備中';
+}
+
+function renderAll(){
+  renderStaffOrders();
+  renderStaffKpis();
+  renderAiList();
+  renderAiKpis();
+  renderSummary();
+  updateRunState();
+}
+
+function renderAiList(){
+  const list = document.getElementById('aiList');
+  if(!ORDERS.length){
+    list.innerHTML = '<div class="muted">まだ注文がありません。</div>';
+    return;
+  }
+  list.innerHTML = ORDERS.map((order, index) => `
+    <div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code">${order.callCode}</div>
+          <div class="row-sub">${order.lockerFull}</div>
+        </div>
+        <div class="tag">${order.source === 'ai' ? '画像読み取り' : order.source === 'same-day' ? '当日注文' : '手入力'}</div>
+      </div>
+      <div class="row-title">${getBentoLabel(order.bento)}</div>
+      <div class="row-meta">個数 ${getQuantity(order)} / ご飯 ${getOrderRice(order)}g</div>
+      <div class="actions"><button class="btn-secondary small" onclick="deleteOrder(${index})">削除</button></div>
+    </div>
+  `).join('');
+}
+
+function renderAiKpis(){
+  const summary = summarizeOrders();
+  document.getElementById('aiKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-n">${summary.total}</div><div class="kpi-l">総個数</div></div>
+    <div class="kpi"><div class="kpi-n">¥${summary.revenue || 0}</div><div class="kpi-l">売上見込</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.wa}</div><div class="kpi-l">和食</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.morning + summary.morning_set}</div><div class="kpi-l">朝メニュー合計</div></div>`;
+}
+
+function renderSummary(){
+  const summary = summarizeOrders();
+  document.getElementById('liveKpis').innerHTML = `
+    <div class="kpi"><div class="kpi-n">${summary.total}</div><div class="kpi-l">総個数</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.served}</div><div class="kpi-l">受取済み</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.remain}</div><div class="kpi-l">未受取</div></div>
+    <div class="kpi"><div class="kpi-n">${summary.rice}g</div><div class="kpi-l">必要ご飯量</div></div>`;
+
+  document.getElementById('itemList').innerHTML = [
+    ['wa', '和食'],
+    ['morning_set', 'モーニングセット（コーヒー付）'],
+    ['morning', 'モーニング（単品）'],
+  ].map(([key, label]) => {
+    const total = ORDERS.filter(order => order.bento === key).reduce((sum, order) => sum + getQuantity(order), 0);
+    const remain = ORDERS.filter(order => order.bento === key && !order.served).reduce((sum, order) => sum + getQuantity(order), 0);
+    const rice = ORDERS.filter(order => order.bento === key && !order.served).reduce((sum, order) => sum + getOrderRice(order) * getQuantity(order), 0);
+    return `<div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-title">${label}</div>
+          <div class="row-meta">残ご飯 ${rice}g</div>
+        </div>
+        <div class="row-code" style="font-size:28px;">${remain}<span class="muted">/${total}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const waiting = ORDERS.filter(order => !order.served);
+  document.getElementById('waitingList').innerHTML = waiting.length ? waiting.map(order => `
+    <div class="row">
+      <div class="row-top">
+        <div class="row-main">
+          <div class="row-code" style="font-size:26px;">${order.callCode}</div>
+          <div class="row-sub">${order.lockerFull}</div>
+        </div>
+        <div class="tag ok">未受取</div>
+      </div>
+      <div class="row-title">${getBentoLabel(order.bento)}</div>
+    </div>
+  `).join('') : '<div class="muted">全員受取済みです。</div>';
+
+  // アレルギー情報は入力不要のため表示しない
+  const alert = document.getElementById('waitingAlert');
+  alert.style.display = 'none';
+
+  document.getElementById('dailyList').innerHTML = DAILY_LOG.length ? DAILY_LOG.map(day => `
+    <div class="daily-row">
+      <div class="daily-date">${day.date}</div>
+      <div class="daily-chip-wrap">
+        <span class="chip">総個数 ${day.summary.total}</span>
+        <span class="chip">受取済み ${day.summary.served}</span>
+        <span class="chip">未受取 ${day.summary.remain}</span>
+        <span class="chip">和食 ${day.summary.wa}</span>
+        <span class="chip">朝メニュー ${day.summary.morning + day.summary.morning_set}</span>
+      </div>
+    </div>
+  `).join('') : '<div class="muted">まだ記録なし</div>';
+}
