@@ -586,12 +586,43 @@
       const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
       const candidate = extractThreeDigits(text);
       if(candidate){
-        return { value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) };
+        return { value: candidate, source: 'tesseract-fast', confidence: Number(res?.data?.confidence || 0) };
       }
     }catch(e){
       console.warn('fast OCR failed', e);
     }
     return null;
+  }
+
+  async function recognizeAccurateThreeDigits(sourceCanvas){
+    const candidates = [];
+    const worker = await ensureTesseractWorker();
+    if(worker){
+      const variants = preprocessForTesseract(sourceCanvas).slice(0, 4);
+      for(let i = 0; i < variants.length; i++){
+        try{
+          const res = await worker.recognize(variants[i].toDataURL('image/png'));
+          const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
+          const candidate = extractThreeDigits(text);
+          if(candidate){
+            candidates.push({ value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) });
+            if(Number(res?.data?.confidence || 0) >= 88 && candidates.length){
+              break;
+            }
+          }
+        }catch(e){
+          console.warn('accurate OCR failed', e);
+        }
+      }
+    }
+
+    const tfjsCandidate = await recognizeDigitsWithTfjs(thresholdToCanvas(sourceCanvas, 160, false));
+    if(tfjsCandidate){
+      candidates.push({ value: tfjsCandidate.value, confidence: Math.round((tfjsCandidate.score || 0) * 100), source: 'tfjs' });
+    }
+
+    if(!candidates.length) return null;
+    return candidates.sort((a, b) => rankCandidate(b) - rankCandidate(a))[0];
   }
 
   async function captureAndOcr(){
@@ -614,8 +645,14 @@
       cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
       const contentCanvas = cropToContent(cropCanvas);
       const best = await recognizeFastThreeDigits(contentCanvas);
-      const tfjsBest = best ? null : await recognizeDigitsWithTfjs(thresholdToCanvas(contentCanvas, 160, false));
-      const finalBest = best || tfjsBest;
+      const orderFromFast = best && best.value ? findOrderByRaw(best.value) : null;
+      let finalBest = best;
+      if(!best || (typeof best.confidence === 'number' && best.confidence < 78) || !orderFromFast){
+        const accurate = await recognizeAccurateThreeDigits(contentCanvas);
+        if(accurate && (!finalBest || rankCandidate(accurate) > rankCandidate(finalBest))){
+          finalBest = accurate;
+        }
+      }
       if(finalBest && finalBest.value){
         const code = normalizeDigits(finalBest.value).slice(-3);
         if(code.length === 3){
