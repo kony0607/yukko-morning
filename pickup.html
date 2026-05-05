@@ -110,6 +110,7 @@
   let tesseractWorkerReady = null;
   let uiState = 'scanner';
   let pendingOrder = null;
+  let cameraStartRetryCount = 0;
 
   function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
   function buildCodeCandidates(raw){
@@ -546,6 +547,7 @@
     reader.appendChild(videoEl);
 
     navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }).then(stream => {
+      cameraStartRetryCount = 0;
       videoStream = stream;
       videoEl.srcObject = stream;
       videoEl.play().catch(()=>{});
@@ -554,6 +556,14 @@
       ocrIntervalId = setInterval(captureAndOcr, 700);
     }).catch(err => {
       const name = err && err.name ? err.name : 'CameraError';
+      if((name === 'NotReadableError' || name === 'AbortError') && cameraStartRetryCount < 3){
+        cameraStartRetryCount += 1;
+        reader.innerHTML = `<div class="muted" style="padding:12px;text-align:center;">カメラを準備中です...(${cameraStartRetryCount}/3)</div>`;
+        setTimeout(() => {
+          if(uiState === 'scanner') startScanner();
+        }, 700);
+        return;
+      }
       const detail = name === 'NotAllowedError'
         ? 'カメラの許可が拒否されています。ブラウザ設定で許可してください。'
         : name === 'NotFoundError'
@@ -571,8 +581,9 @@
     if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
     const reader = document.getElementById('reader'); if(reader) reader.innerHTML = 'カメラを停止しました';
     html5QrCode = null;
+    ocrRunning = false;
   }
-  function restartScanner(){ hideOverlay(); setUiState('scanner'); stopScanner(); startScanner(); }
+  function restartScanner(){ hideOverlay(); setUiState('scanner'); stopScanner(); ocrRunning = false; startScanner(); }
 
   async function recognizeFastThreeDigits(sourceCanvas){
     const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
@@ -647,7 +658,7 @@
       const best = await recognizeFastThreeDigits(contentCanvas);
       const orderFromFast = best && best.value ? findOrderByRaw(best.value) : null;
       let finalBest = best;
-      if(!best || (typeof best.confidence === 'number' && best.confidence < 78) || !orderFromFast){
+      if(!best || (typeof best.confidence === 'number' && best.confidence < 85) || !orderFromFast){
         const accurate = await recognizeAccurateThreeDigits(contentCanvas);
         if(accurate && (!finalBest || rankCandidate(accurate) > rankCandidate(finalBest))){
           finalBest = accurate;
@@ -811,7 +822,7 @@
     setUiState('busy');
     const el = document.getElementById('pickupResult');
     el.innerHTML = `<div class="${cls}">${text}</div>`;
-    setTimeout(()=>{ el.innerHTML=''; restartScanner(); }, 2800);
+    setTimeout(()=>{ el.innerHTML=''; ocrRunning = false; restartScanner(); }, 2800);
   }
 
   function goNewOrder(code){
