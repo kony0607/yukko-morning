@@ -33,6 +33,10 @@
     <div class="row"><div class="label">読み取った呼び出し番号</div><input id="call" readonly /></div>
     <div class="row"><div class="label">個数</div><input id="qty" type="number" min="1" value="1" /></div>
 
+    <div class="row"><div class="label">当日の価格</div>
+      <div id="priceInfo" class="muted">読み取り後に表示されます</div>
+    </div>
+
     <div id="stage-choice" class="stage on">
       <div class="choice-grid">
         <button class="choice" onclick="chooseBento('wa')">
@@ -80,6 +84,13 @@
   let firebaseApp=null,database=null,enabled=false;
   try{ firebaseApp = firebase.initializeApp(firebaseConfig); database = firebase.database(firebaseApp); enabled=true; }catch(e){ console.warn('Firebase init failed', e.message); }
 
+  // 当日の弁当価格（index.html と合わせる）
+  const BENTO_INFO = {
+    wa: { label: '和食セット', price: 600 },
+    morning: { label: '洋食(モーニング)', price: 500 },
+    morning_set: { label: 'モーニングセット（コーヒー付）', price: 600 }
+  };
+
   function qs(name){ const u=new URL(location.href); return u.searchParams.get(name); }
   document.getElementById('call').value = qs('call') || '';
 
@@ -87,6 +98,9 @@
 
   function chooseBento(kind){
     selectedBento = kind;
+    // 価格表示
+    const price = BENTO_INFO[kind] ? `¥${BENTO_INFO[kind].price}` : '¥0';
+    document.getElementById('priceInfo').textContent = `${BENTO_INFO[kind].label || kind} — ${price}`;
     if(kind === 'morning'){
       document.getElementById('stage-choice').classList.remove('on');
       document.getElementById('stage-coffee').classList.add('on');
@@ -112,7 +126,7 @@
       callCode: call,
       bento,
       quantity: qty,
-      price: 0,
+      price: BENTO_INFO[bento]?.price || 0,
       rice: 0,
       served:false,
       createdAt: new Date().toISOString(),

@@ -29,7 +29,13 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="title">受け取り受付 — お客様用（画面固定で使用してください）</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+      <div class="title">受け取り受付 — お客様用（画面固定で使用してください）</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <a href="staff.html"><button class="btn btn-ghost">スタッフ画面へ</button></a>
+        <a href="index.html"><button class="btn btn-ghost">管理トップへ</button></a>
+      </div>
+    </div>
     <div id="reader">カメラを起動中...</div>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="restartScanner()">再起動</button>
@@ -132,9 +138,33 @@
       const cropCanvas = document.createElement('canvas');
       cropCanvas.width = cropW; cropCanvas.height = cropH;
       const cctx = cropCanvas.getContext('2d');
-      cctx.filter = 'grayscale(1) contrast(1.6) brightness(1.1)';
       cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.9);
+      // 前処理: グレースケール -> 二値化 (簡易Otsuライク) -> 拡大
+      const img = cctx.getImageData(0,0,cropW,cropH);
+      // convert to luminance and compute average
+      let sum=0; const lum = new Uint8ClampedArray(cropW*cropH);
+      for(let i=0, j=0;i<img.data.length;i+=4, j++){
+        const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
+        const l = 0.299*r + 0.587*g + 0.114*b; lum[j]=l; sum += l;
+      }
+      const avg = sum / lum.length;
+      const threshold = Math.max(80, Math.min(160, avg * 0.9));
+      // apply binary
+      for(let i=0, j=0;i<img.data.length;i+=4, j++){
+        const v = lum[j] < threshold ? 0 : 255;
+        img.data[i]=img.data[i+1]=img.data[i+2]=v;
+        img.data[i+3]=255;
+      }
+      cctx.putImageData(img,0,0);
+      // scale up to improve OCR
+      const scale = Math.min(2, Math.max(1, Math.floor(1024 / Math.max(cropW, cropH))));
+      const bigW = Math.max(cropW * scale, cropW);
+      const bigH = Math.max(cropH * scale, cropH);
+      const bigCanvas = document.createElement('canvas'); bigCanvas.width = bigW; bigCanvas.height = bigH;
+      const bctx = bigCanvas.getContext('2d');
+      bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
+      bctx.drawImage(cropCanvas, 0, 0, bigW, bigH);
+      const dataUrl = bigCanvas.toDataURL('image/png');
       const res = await Tesseract.recognize(dataUrl, 'eng', {
         logger: () => {},
         tessedit_char_whitelist: '0123456789',
@@ -158,15 +188,19 @@
 
   function askConfirmNumber(code){
     pendingScanCode = normalizeDigits(code).slice(-3);
-    document.getElementById('pickupResult').innerHTML = `
-      <div class="confirm">
-        <div class="confirm-code">${pendingScanCode}</div>
-        <div class="confirm-text">この番号でお間違いないですか？</div>
-        <div class="confirm-row">
-          <button class="btn btn-primary" onclick="confirmScanYes()">はい</button>
-          <button class="btn btn-ghost" onclick="confirmScanNo()">いいえ</button>
-        </div>
-      </div>`;
+    const root = document.getElementById('pickupResult');
+    root.innerHTML = '';
+    const box = document.createElement('div'); box.className = 'confirm';
+    const codeEl = document.createElement('div'); codeEl.className = 'confirm-code'; codeEl.textContent = pendingScanCode;
+    const txt = document.createElement('div'); txt.className = 'confirm-text'; txt.textContent = 'この番号でお間違いないですか？';
+    const row = document.createElement('div'); row.className = 'confirm-row';
+    const yes = document.createElement('button'); yes.className = 'btn btn-primary'; yes.textContent = 'はい';
+    const no = document.createElement('button'); no.className = 'btn btn-ghost'; no.textContent = 'いいえ';
+    yes.addEventListener('click', () => { confirmScanYes(); });
+    no.addEventListener('click', () => { confirmScanNo(); });
+    row.appendChild(yes); row.appendChild(no);
+    box.appendChild(codeEl); box.appendChild(txt); box.appendChild(row);
+    root.appendChild(box);
   }
 
   function confirmScanYes(){

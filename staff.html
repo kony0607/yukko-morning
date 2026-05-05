@@ -40,6 +40,9 @@
     .day-card{border:1px solid #eee;border-radius:12px;padding:12px;background:#fff}
     .day-date{font-size:17px;font-weight:800;margin-bottom:6px}
     .day-line{font-size:14px;color:#555;line-height:1.6}
+    .calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+    .calendar-cell{background:#fff;border:1px solid #eee;border-radius:8px;padding:8px;min-height:70px}
+    .calendar-cell .day-num{font-weight:800;margin-bottom:6px}
     @media (max-width:900px){
       .grid{grid-template-columns:1fr}
       .form-grid{grid-template-columns:1fr 1fr}
@@ -48,7 +51,13 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="title">スタッフ画面 — 調理順キュー</div>
+    <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+      <div class="title">スタッフ画面 — 調理順キュー</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <a href="pickup.html"><button class="btn btn-ghost">お客様画面へ</button></a>
+        <a href="index.html"><button class="btn btn-ghost">管理トップへ</button></a>
+      </div>
+    </div>
     <div class="card" style="margin-bottom:12px;">
       <h3>新規注文を追加</h3>
       <div class="form-grid">
@@ -126,6 +135,15 @@
   const ORDERS = [];
   const DAILY_SUMMARIES = [];
   let currentPanel = 'overall';
+  // カレンダー表示用の年月（デフォルトは当月）
+  let displayYear = (new Date()).getFullYear();
+  let displayMonth = (new Date()).getMonth();
+  // 価格情報（index.html と合わせる）
+  const BENTO_INFO = {
+    wa: { label: '和食セット', price: 600 },
+    morning: { label: 'モーニング（単品）', price: 500 },
+    morning_set: { label: 'モーニングセット（コーヒー付）', price: 600 }
+  };
 
   function normalizeDigits(v){ return String(v || '').replace(/\D/g, ''); }
 
@@ -220,6 +238,12 @@
       document.getElementById('status').textContent = '締め対象がありません';
       return;
     }
+    // 全て提供済みでない場合は締め不可
+    const hasUnserved = items.some(o => !o.served);
+    if(hasUnserved){
+      document.getElementById('status').textContent = '未提供の注文があります。すべて提供済みにしてから締めを実行してください。';
+      return;
+    }
     if(!confirm(`${date} の締めを実行します。注文詳細を消して集計だけ保存します。よろしいですか？`)) return;
 
     const summary = {
@@ -234,13 +258,34 @@
       }))
     };
 
+    document.getElementById('status').textContent = `${date} の締め中...`;
     try{
+      // 日別集計を書き込み
       await database.ref('dailySummaries/' + date).set(summary);
+    }catch(e){
+      console.error('dailySummaries write failed', e);
+      const msg = e && e.message ? e.message : String(e);
+      let uiMsg = `締め保存に失敗しました: ${msg}`;
+      if(msg && msg.indexOf('PERMISSION_DENIED') !== -1){
+        uiMsg += '\nFirebase の Realtime Database の書き込み権限が必要です。\nFirebase コンソールの Database → Rules を確認してください。';
+      }
+      document.getElementById('status').textContent = uiMsg;
+      // 詳細はコンソール参照
+      return;
+    }
+
+    try{
+      // 集計保存に成功してから注文一覧を削除（失敗した場合はログを残す）
       await database.ref('orders').remove();
       document.getElementById('status').textContent = `${date} の締めを保存しました`;
     }catch(e){
-      console.error(e);
-      document.getElementById('status').textContent = '締め保存に失敗しました';
+      console.error('orders removal failed', e);
+      const msg = e && e.message ? e.message : String(e);
+      let uiMsg = `集計保存済みだが注文削除に失敗しました: ${msg}`;
+      if(msg && msg.indexOf('PERMISSION_DENIED') !== -1){
+        uiMsg += '\n注文削除の書き込み権限がありません。Firebase Database のルールを確認してください。';
+      }
+      document.getElementById('status').textContent = uiMsg;
     }
   }
 
@@ -386,20 +431,50 @@
   function renderSummaryList(){
     const container = document.getElementById('summaryList');
     if(!container) return;
-    if(!DAILY_SUMMARIES.length){
-      container.innerHTML = '<div class="muted">まだ日別集計がありません</div>';
-      return;
+    // 月カレンダーレイアウト表示（displayYear/displayMonth）
+    const year = displayYear;
+    const month = displayMonth;
+    // map 日付->counts
+    const map = {};
+    DAILY_SUMMARIES.forEach(d => { if(d && d.date) map[d.date] = d.counts || {}; });
+    const first = new Date(year, month, 1);
+    const last = new Date(year, month + 1, 0);
+    const daysInMonth = last.getDate();
+    const startWeek = first.getDay();
+    let cells = [];
+    // 空セル
+    for(let i=0;i<startWeek;i++) cells.push('');
+    for(let d=1; d<=daysInMonth; d++){
+      const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const counts = map[key] || {};
+      const html = `<div class="calendar-cell"><div class="day-num">${d}</div><div class="day-line">全:${counts.total||0}</div><div class="day-line">和:${counts.wa||0}</div><div class="day-line">モ:${counts.morning||0}</div></div>`;
+      cells.push(html);
     }
-    container.innerHTML = DAILY_SUMMARIES.slice(0, 31).map(day => {
-      const counts = day.counts || {};
-      return `<div class="day-card">
-        <div class="day-date">${day.date}</div>
-        <div class="day-line">全体: ${counts.total || 0} 個</div>
-        <div class="day-line">和食: ${counts.wa || 0} 個</div>
-        <div class="day-line">モーニング: ${counts.morning || 0} 個</div>
-        <div class="day-line">モーニングセット: ${counts.morning_set || 0} 個</div>
-      </div>`;
-    }).join('');
+    // fill trailing cells to make full weeks
+    while(cells.length % 7 !== 0) cells.push('');
+    // ヘッダー（前月/次月）とカレンダー
+    container.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn btn-ghost" id="prevMonth">◀</button>
+          <strong>${year}年 ${month+1}月</strong>
+          <button class="btn btn-ghost" id="nextMonth">▶</button>
+        </div>
+        <div style="font-weight:700">月集計: <span id="monthTotals">---</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;background:transparent;font-weight:700;padding:6px"><div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div></div>
+      <div class="calendar-grid">${cells.join('')}</div>`;
+
+    // 月集計を計算して表示
+    const monthKeyPrefix = `${year}-${String(month+1).padStart(2,'0')}-`;
+    let monthTotals = { total:0, wa:0, morning:0, morning_set:0 };
+    Object.keys(map).forEach(k => { if(k.startsWith(monthKeyPrefix)){ const c = map[k] || {}; monthTotals.total += (c.total||0); monthTotals.wa += (c.wa||0); monthTotals.morning += (c.morning||0); monthTotals.morning_set += (c.morning_set||0); } });
+    const revenue = (monthTotals.wa * (BENTO_INFO.wa.price||0)) + (monthTotals.morning * (BENTO_INFO.morning.price||0)) + (monthTotals.morning_set * (BENTO_INFO.morning_set.price||0));
+    document.getElementById('monthTotals').textContent = `個数:${monthTotals.total} (和:${monthTotals.wa} / モ:${monthTotals.morning} / MS:${monthTotals.morning_set})  売上: ¥${revenue}`;
+
+    // 月切替ボタンのイベント
+    document.getElementById('prevMonth').addEventListener('click', ()=>{ displayMonth--; if(displayMonth<0){ displayMonth=11; displayYear--; } renderSummaryList(); });
+    document.getElementById('nextMonth').addEventListener('click', ()=>{ displayMonth++; if(displayMonth>11){ displayMonth=0; displayYear++; } renderSummaryList(); });
   }
 
   if(firebaseEnabled){ sync(); syncSummaries(); }
