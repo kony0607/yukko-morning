@@ -48,6 +48,9 @@
     .summary-table th:first-child,.summary-table td:first-child{text-align:left}
     .summary-table thead th{background:#f8f6ef;color:#444;font-weight:800}
     .summary-table tr:last-child td{border-bottom:none}
+    .month-summary-block{background:#fff;border:1px solid #eee;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+    .month-summary-title{font-size:18px;font-weight:800;margin-bottom:8px}
+    .month-summary-note{font-size:12px;color:#777;margin-top:6px;line-height:1.6}
     @media (max-width:900px){
       .grid{grid-template-columns:1fr}
       .form-grid{grid-template-columns:1fr 1fr}
@@ -76,6 +79,10 @@
         <button class="btn btn-primary" onclick="createOrder()">追加</button>
       </div>
       <div id="createMsg" class="muted" style="margin-top:8px;"></div>
+    </div>
+    <div class="card month-summary-block" style="margin-bottom:12px;">
+      <div class="month-summary-title">今月の集計</div>
+      <div id="monthSummaryQuick">---</div>
     </div>
     <div class="tabs">
       <button id="tab-overall" class="tab on" onclick="switchPanel('overall')">全体マップ</button>
@@ -111,10 +118,6 @@
         <div class="card" style="margin-top:12px">
           <h3>同期状況</h3>
           <div id="status" class="muted">---</div>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <h3>今月の集計</h3>
-          <div id="monthSummaryQuick" class="muted">---</div>
         </div>
         <div class="card" style="margin-top:12px">
           <h3>本日の締め</h3>

@@ -441,7 +441,6 @@
     const reader = document.getElementById('reader');
     const secureContext = window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ reader.innerHTML = '<div class="muted">カメラは HTTPS または localhost でしか利用できません。手入力または写真で読み取ってください。</div>'; return; }
-    loadDigitModel();
     reader.innerHTML = '';
     videoEl = document.createElement('video');
     videoEl.setAttribute('playsinline', '');
@@ -470,6 +469,39 @@
   }
   function restartScanner(){ hideOverlay(); setUiState('scanner'); stopScanner(); startScanner(); }
 
+  async function recognizeFastThreeDigits(sourceCanvas){
+    const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const { avg } = getImageLumaArray(src);
+    const base = Math.max(80, Math.min(180, avg));
+    const thresholds = [Math.round(base * 0.92), Math.round(base * 1.02)];
+    for(const threshold of thresholds){
+      for(const invert of [false, true]){
+        try{
+          const variant = thresholdToCanvas(sourceCanvas, threshold, invert);
+          const res = await Tesseract.recognize(variant.toDataURL('image/png'), 'eng', {
+            logger: () => {},
+            tessedit_char_whitelist: '0123456789',
+            tessedit_pageseg_mode: 7,
+            user_defined_dpi: '300',
+            tessedit_enable_dict_correction: '0',
+            load_system_dawg: '0',
+            load_freq_dawg: '0',
+            classify_bln_numeric_mode: '1',
+            preserve_interword_spaces: '0'
+          });
+          const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
+          const candidate = extractThreeDigits(text);
+          if(candidate){
+            return { value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) };
+          }
+        }catch(e){
+          console.warn('fast OCR failed', e);
+        }
+      }
+    }
+    return null;
+  }
+
   async function captureAndOcr(){
     if(uiState !== 'scanner') return;
     if(ocrRunning) return; if(!videoEl || videoEl.readyState < 2) return;
@@ -489,27 +521,7 @@
       const cctx = cropCanvas.getContext('2d');
       cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
       const contentCanvas = cropToContent(cropCanvas);
-      const candidates = [];
-
-      const tesseractCandidates = await recognizeWithTesseractVariants(contentCanvas);
-      tesseractCandidates.forEach(candidate => candidates.push(candidate));
-
-      await loadDigitModel();
-      if(digitModel){
-        const tfVariants = preprocessForTesseract(contentCanvas).filter((_, index) => index % 2 === 1);
-        for(const variant of tfVariants){
-          const classified = await recognizeDigitsWithTfjs(variant);
-          if(classified && classified.value && classified.value.length === 3){
-            candidates.push({ value: classified.value, confidence: classified.score * 100, source: 'tfjs' });
-          }
-        }
-      }
-
-      const best = candidates
-        .map(candidate => ({ ...candidate, rank: rankCandidate(candidate) }))
-        .filter(candidate => candidate.rank >= 0)
-        .sort((a, b) => b.rank - a.rank)[0];
-
+      const best = await recognizeFastThreeDigits(contentCanvas);
       if(best && best.value){
         const code = normalizeDigits(best.value).slice(-3);
         if(code.length === 3){
@@ -519,7 +531,7 @@
         }
       }
 
-      // 1回では読めなかった場合、軽く待って次のフレームへ
+      // 1回では読めなかった場合は次フレームへ回す
       ocrRunning = false;
       return;
     }catch(e){ console.warn('OCR error', e); }
@@ -550,11 +562,13 @@
   function confirmScanNo(){
     pendingScanCode = '';
     pendingOrder = null;
+    hideOverlay();
     showManualCorrectionPrompt('');
   }
 
   function showManualCorrectionPrompt(initialValue){
     setUiState('manual-correction');
+    hideOverlay();
     const root = document.getElementById('pickupResult');
     const safeValue = normalizeDigits(initialValue || '').slice(0,3);
     root.innerHTML = '';
@@ -639,8 +653,8 @@
     const safeCode = normalizeDigits(code || '').slice(-3);
     root.innerHTML = '';
     showOverlay('新規注文の確認', `${safeCode || '---'} は未登録です。新規注文を作成しますか？`, [
-      { label: '作成する', primary: true, onClick: () => goNewOrder(safeCode) },
-      { label: '戻る', primary: false, onClick: () => restartScanner() }
+      { label: '作成する', primary: true, onClick: () => { hideOverlay(); goNewOrder(safeCode); } },
+      { label: '戻る', primary: false, onClick: () => { hideOverlay(); restartScanner(); } }
     ]);
   }
 
