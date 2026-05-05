@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>新規注文登録</title>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <style>
+    body{font-family:Meiryo, 'Noto Sans JP',sans-serif;background:#f6f3ea;margin:0;padding:18px;color:#1d1b16}
+    .card{background:#fff;padding:14px;border-radius:12px;border:1px solid #ded7c6;max-width:720px;margin:0 auto}
+    .row{margin-bottom:10px}
+    .label{font-size:13px;margin-bottom:6px;color:#555}
+    input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #ddd}
+    .btn{padding:10px 12px;border-radius:10px;border:0;cursor:pointer}
+    .btn-primary{background:#1d6b4b;color:#fff}
+    .btn-ghost{background:#fff;border:1px solid #ddd}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>未登録の番号で新規注文を作成</h2>
+    <div class="row"><div class="label">読み取った呼び出し番号</div><input id="call" readonly /></div>
+    <div class="row"><div class="label">弁当</div><select id="bento"><option value="wa">和食</option><option value="morning">洋食（コーヒー選択可）</option><option value="morning_set">洋食セット（コーヒー付）</option></select></div>
+    <div class="row"><div class="label">個数</div><input id="qty" type="number" min="1" value="1" /></div>
+    <div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="create()">作成して戻る</button><button class="btn btn-ghost" onclick="cancel()">キャンセル</button></div>
+    <div id="msg" style="margin-top:12px;color:#666"></div>
+  </div>
+
+  <script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyCImbm2Eg_eGrChlSfEd4eJii_TCRrPl0o",
+    authDomain: "yukko-morning.firebaseapp.com",
+    databaseURL: "https://yukko-morning-default-rtdb.firebaseio.com",
+    projectId: "yukko-morning",
+    storageBucket: "yukko-morning.firebasestorage.app",
+    messagingSenderId: "282456272088",
+    appId: "1:282456272088:web:1f529eab40f32630927bad",
+    measurementId: "G-KFK1Q7RW1V"
+  };
+  let firebaseApp=null,database=null,enabled=false;
+  try{ firebaseApp = firebase.initializeApp(firebaseConfig); database = firebase.database(firebaseApp); enabled=true; }catch(e){ console.warn('Firebase init failed', e.message); }
+
+  function qs(name){ const u=new URL(location.href); return u.searchParams.get(name); }
+  document.getElementById('call').value = qs('call') || '';
+
+  async function create(){
+    const call = document.getElementById('call').value.replace(/\D/g,'').slice(0,3) || ('SD'+String(Date.now()).slice(-5));
+    const bento = document.getElementById('bento').value;
+    const qty = Math.max(1, Number(document.getElementById('qty').value || 1));
+    const locker = 'SD' + String(Date.now()).slice(-7);
+    const order = {
+      lockerFull: locker,
+      callCode: call,
+      bento,
+      quantity: qty,
+      price: 0,
+      rice: 0,
+      served:false,
+      createdAt: new Date().toISOString(),
+      source: 'pickup-new'
+    };
+    if(enabled && database){
+      try{ await database.ref('orders/' + locker).set(order); document.getElementById('msg').textContent = '作成しました。戻ります...'; setTimeout(()=>{ returnBack(); }, 1000); }catch(e){ document.getElementById('msg').textContent = '保存に失敗しました'; console.error(e); }
+    } else {
+      // Firebase が無効な場合はクエリで戻す
+      document.getElementById('msg').textContent = 'Firebase 未接続のため作成できません。戻ります。'; setTimeout(()=>{ returnBack(); }, 900);
+    }
+  }
+
+  function returnBack(){ const from = qs('from') || 'pickup'; if(from==='pickup') location.href = 'pickup.html'; else location.href = 'index.html'; }
+  function cancel(){ returnBack(); }
+  </script>
+</body>
+</html>

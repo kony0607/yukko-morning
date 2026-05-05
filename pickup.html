@@ -7,6 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
   <style>
     body{font-family:Meiryo, 'Noto Sans JP',sans-serif;margin:0;background:#f6f3ea;color:#1d1b16}
     .wrap{max-width:720px;margin:0 auto;padding:18px}
@@ -32,7 +33,7 @@
       <input id="fileInput" type="file" accept="image/*" capture="environment" style="display:none" onchange="onFile(event)" />
     </div>
     <div class="manual" style="margin-top:12px;display:flex;gap:8px;align-items:center;">
-      <input id="manualInput" placeholder="ロッカー番号または呼び出し番号（例:10001 or 001）" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ddd;" onkeydown="if(event.key==='Enter')onManualConfirm()" />
+      <input id="manualInput" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="呼び出し番号（3桁）" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ddd;" oninput="this.value=this.value.replace(/\D/g,'').slice(0,3)" onkeydown="if(event.key==='Enter')onManualConfirm()" />
       <button class="btn btn-primary" onclick="onManualConfirm()">確認</button>
     </div>
     <div class="note">1回目のスキャン → 受付（席へ戻す）。2回目のスキャン → 提供済みにします。20秒以内の連続スキャンは誤操作として無視されます。</div>
@@ -58,6 +59,11 @@
   const ORDERS = [];
   let html5QrCode = null;
   const IGNORE_WINDOW_MS = 20 * 1000; // 20秒
+  // OCR カメラ用
+  let videoEl = null;
+  let videoStream = null;
+  let ocrIntervalId = null;
+  let ocrRunning = false;
 
   function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
   function buildCodeCandidates(raw){
@@ -76,19 +82,58 @@
   function startScanner(){
     const reader = document.getElementById('reader');
     const secureContext = window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ reader.innerHTML = '<div class="muted">カメラは HTTPS または localhost でしか利用できません。写真で読み取ってください。</div>'; return; }
-    try{
-      html5QrCode = new Html5Qrcode('reader');
-      html5QrCode.start({facingMode:'environment'}, {fps:10, qrbox:250}, decoded => {
-        if(normalizeDigits(decoded)){
-          processScan(decoded);
-        }
-      }).catch(err => { reader.innerHTML = '<div class="muted">カメラ起動に失敗しました。</div>'; });
-    }catch(e){ reader.innerHTML = '<div class="muted">カメラ初期化失敗</div>'; }
+    if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ reader.innerHTML = '<div class="muted">カメラは HTTPS または localhost でしか利用できません。手入力または写真で読み取ってください。</div>'; return; }
+    reader.innerHTML = '';
+    videoEl = document.createElement('video');
+    videoEl.setAttribute('playsinline', '');
+    videoEl.style.width = '100%';
+    videoEl.style.height = '100%';
+    reader.appendChild(videoEl);
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => {
+      videoStream = stream;
+      videoEl.srcObject = stream;
+      videoEl.play().catch(()=>{});
+      // OCR ループ
+      if(ocrIntervalId) clearInterval(ocrIntervalId);
+      ocrIntervalId = setInterval(captureAndOcr, 1400);
+    }).catch(err => {
+      reader.innerHTML = '<div class="muted">カメラ起動に失敗しました。権限または端末の設定を確認してください。</div>';
+    });
   }
 
   function stopScanner(){ if(html5QrCode){ try{ html5QrCode.stop().catch(()=>{}); }catch(e){} html5QrCode=null; }}
+  function stopScanner(){
+    if(ocrIntervalId){ clearInterval(ocrIntervalId); ocrIntervalId = null; }
+    if(videoEl && videoEl.pause) try{ videoEl.pause(); }catch(e){}
+    if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
+    const reader = document.getElementById('reader'); if(reader) reader.innerHTML = 'カメラを停止しました';
+    html5QrCode = null;
+  }
   function restartScanner(){ stopScanner(); startScanner(); }
+
+  async function captureAndOcr(){
+    if(ocrRunning) return; if(!videoEl || videoEl.readyState < 2) return;
+    ocrRunning = true;
+    try{
+      const w = Math.min(videoEl.videoWidth || 640, 1280);
+      const h = Math.min(videoEl.videoHeight || 480, 720);
+      const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d'); ctx.drawImage(videoEl, 0, 0, w, h);
+      // 画像を少しトリミングして数字が中央に来ることを期待
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+      const res = await Tesseract.recognize(dataUrl, 'eng', { logger: m => {} });
+      const text = (res && res.data && res.data.text) ? res.data.text : '';
+      const digits = text.replace(/\D/g, '');
+      // 3桁の連続数字を探す
+      const m = digits.match(/(\d{3})/);
+      if(m && m[1]){
+        stopScanner();
+        processScan(m[1]);
+      }
+    }catch(e){ console.warn('OCR error', e); }
+    ocrRunning = false;
+  }
 
   async function processScan(raw){
     const now = Date.now();
@@ -115,9 +160,16 @@
 
   // 手入力での確認（2回方式対応）
   function onManualConfirm(){
-    const v = document.getElementById('manualInput').value.trim();
+    const v = document.getElementById('manualInput').value.trim().replace(/\D/g,'').slice(0,3);
     if(!v) return;
     // 処理はカメラスキャンと同じ
+    // 未登録なら新規ページへ誘導（indexの当日注文に合わせる）
+    const order = findOrderByRaw(v);
+    if(!order){
+      // neworder.html へ遷移して作成、戻る想定
+      window.location.href = `neworder.html?call=${encodeURIComponent(v)}&from=pickup`;
+      return;
+    }
     processScan(v);
     document.getElementById('manualInput').value = '';
   }
