@@ -728,9 +728,9 @@
       const ctx = canvas.getContext('2d');
       ctx.drawImage(videoEl, 0, 0, w, h);
       
-      // 中央領域だけを使ってOCR精度を上げる
-      const cropW = Math.floor(w * 0.56);
-      const cropH = Math.floor(h * 0.28);
+      // 中央領域だけを使ってOCR精度を上げる（少し広めに）
+      const cropW = Math.floor(w * 0.68);
+      const cropH = Math.floor(h * 0.38);
       const cropX = Math.floor((w - cropW) / 2);
       const cropY = Math.floor((h - cropH) / 2);
       const cropCanvas = document.createElement('canvas');
