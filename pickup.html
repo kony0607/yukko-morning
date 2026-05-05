@@ -112,6 +112,9 @@
   let pendingOrder = null;
   let cameraStartRetryCount = 0;
   let cameraConstraintIndex = 0;
+  let frameBuffer = [];
+  const FRAME_BUFFER_SIZE = 5;
+  const ACCURACY_MODE_INTERVAL = 1000; // 1秒ごとにOCRを実行（精度優先）
   const CAMERA_CONSTRAINTS = [
     { video: { facingMode: { ideal: 'environment' } }, audio: false },
     { video: { facingMode: { exact: 'environment' } }, audio: false },
@@ -256,22 +259,32 @@
     const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
     const { avg } = getImageLumaArray(src);
     const base = Math.max(70, Math.min(190, avg));
-    // 候補を大幅に削減（本来の11個 → 4個）
+    // 精度優先：20個の閾値候補を試す（低速だが高精度）
     return [
+      Math.round(base * 0.75),
+      Math.round(base * 0.80),
+      Math.round(base * 0.85),
       Math.round(base * 0.90),
+      Math.round(base * 0.95),
       Math.round(base * 1.00),
+      Math.round(base * 1.05),
       Math.round(base * 1.10),
-      Math.round(base * 1.20)
+      Math.round(base * 1.15),
+      Math.round(base * 1.20),
+      Math.round(base * 1.25),
+      Math.round(base * 1.30),
+      Math.round(base * 1.40),
+      Math.round(base * 1.50)
     ].filter(v => v >= 40 && v <= 220);
   }
 
   function preprocessForTesseract(sourceCanvas){
     const variants = [];
     const thresholds = buildThresholdCandidates(sourceCanvas);
-    // 最初の2つは通常と反転、残りは通常のみ（高速化）
-    thresholds.forEach((threshold, idx) => {
+    // 全ての閾値について通常と反転の両方を生成
+    thresholds.forEach((threshold) => {
       variants.push(thresholdToCanvas(sourceCanvas, threshold, false));
-      if(idx < 2) variants.push(thresholdToCanvas(sourceCanvas, threshold, true));
+      variants.push(thresholdToCanvas(sourceCanvas, threshold, true));
     });
     return variants;
   }
@@ -485,14 +498,17 @@
 
   function extractThreeDigits(text){
     const digits = normalizeDigits(String(text || '')
-      .replace(/[oOqQD]/g, '0')
-      .replace(/[iIlL|!]/g, '1')
-      .replace(/[zZ]/g, '2')
-      .replace(/[sS$]/g, '5')
-      .replace(/[bB]/g, '8')
-      .replace(/[gG]/g, '6')
-      .replace(/[tT]/g, '7')
-      .replace(/[aA]/g, '4'));
+      .replace(/[oOqQD°0O]/g, '0')
+      .replace(/[iIlL|!1]/g, '1')
+      .replace(/[zZ2]/g, '2')
+      .replace(/[sS$5]/g, '5')
+      .replace(/[bB8]/g, '8')
+      .replace(/[gG6]/g, '6')
+      .replace(/[tT7]/g, '7')
+      .replace(/[aA4]/g, '4')
+      .replace(/[eE3]/g, '3')
+      .replace(/[bB8]/g, '8')
+      .replace(/[pP9]/g, '9'));
     if(!digits) return null;
     const direct = digits.match(/\d{3}/);
     if(direct) return direct[0];
@@ -508,9 +524,10 @@
     if(value.length !== 3) return -1;
     const parsed = Number(value);
     if(Number.isNaN(parsed)) return -1;
-    const base = candidate.source === 'tfjs' ? 85 : 70;
+    // TFJS に高い重みを付与（精度が高い傾向）
+    const base = candidate.source === 'tfjs' ? 90 : (candidate.source === 'tesseract' ? 75 : 70);
     const confidence = typeof candidate.confidence === 'number' ? candidate.confidence : 0;
-    return base + Math.min(25, confidence);
+    return base + Math.min(30, confidence);
   }
 
   async function recognizeWithTesseractVariants(sourceCanvas){
@@ -568,9 +585,9 @@
       videoStream = stream;
       videoEl.srcObject = stream;
       videoEl.play().catch(()=>{});
-      // OCR ループ
+      // OCR ループ（精度優先モード：1秒ごと）
       if(ocrIntervalId) clearInterval(ocrIntervalId);
-      ocrIntervalId = setInterval(captureAndOcr, 700);
+      ocrIntervalId = setInterval(captureAndOcr, ACCURACY_MODE_INTERVAL);
     }).catch(err => {
       const name = err && err.name ? err.name : 'CameraError';
       if(cameraConstraintIndex < CAMERA_CONSTRAINTS.length - 1){
@@ -626,40 +643,44 @@
   }
 
   async function recognizeFastThreeDigits(sourceCanvas){
-    const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
-    const { avg } = getImageLumaArray(src);
-    const threshold = Math.max(70, Math.min(190, Math.round(avg * 1.02)));
-    try{
-      const variant = thresholdToCanvas(sourceCanvas, threshold, false);
-      const worker = await ensureTesseractWorker();
-      if(!worker) return null;
-      const res = await worker.recognize(variant.toDataURL('image/png'));
-      const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
-      const candidate = extractThreeDigits(text);
-      if(candidate){
-        return { value: candidate, source: 'tesseract-fast', confidence: Number(res?.data?.confidence || 0) };
+    // 精度モード：複数の前処理バリエーションで、最も高い信頼度を持つ結果を返す
+    const candidates = [];
+    const variants = preprocessForTesseract(sourceCanvas);
+    // 並列にではなく、順序をつけてOCRを実行し、高い信頼度が得られたら早期終了
+    for(let i = 0; i < Math.min(variants.length, 8); i++){
+      try{
+        const worker = await ensureTesseractWorker();
+        if(!worker) continue;
+        const res = await worker.recognize(variants[i].toDataURL('image/png'));
+        const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
+        const candidate = extractThreeDigits(text);
+        if(candidate){
+          const conf = Number(res?.data?.confidence || 0);
+          candidates.push({ value: candidate, source: 'tesseract-fast', confidence: conf });
+          // 信頼度が高い結果が得られたら早期確定
+          if(conf >= 92) break;
+        }
+      }catch(e){
+        console.warn('fast OCR variant failed', e);
       }
-    }catch(e){
-      console.warn('fast OCR failed', e);
     }
-    return null;
+    if(!candidates.length) return null;
+    return candidates.sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
   }
 
   async function recognizeAccurateThreeDigits(sourceCanvas){
     const candidates = [];
     const worker = await ensureTesseractWorker();
     if(worker){
-      const variants = preprocessForTesseract(sourceCanvas).slice(0, 4);
-      for(let i = 0; i < variants.length; i++){
+      const variants = preprocessForTesseract(sourceCanvas);
+      for(let i = 0; i < Math.min(variants.length, 12); i++){
         try{
           const res = await worker.recognize(variants[i].toDataURL('image/png'));
           const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
           const candidate = extractThreeDigits(text);
           if(candidate){
             candidates.push({ value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) });
-            if(Number(res?.data?.confidence || 0) >= 88 && candidates.length){
-              break;
-            }
+            if(Number(res?.data?.confidence || 0) >= 95) break;
           }
         }catch(e){
           console.warn('accurate OCR failed', e);
@@ -667,56 +688,105 @@
       }
     }
 
-    const tfjsCandidate = await recognizeDigitsWithTfjs(thresholdToCanvas(sourceCanvas, 160, false));
-    if(tfjsCandidate){
-      candidates.push({ value: tfjsCandidate.value, confidence: Math.round((tfjsCandidate.score || 0) * 100), source: 'tfjs' });
+    // TFJS を複数の前処理で試す（高精度が必要）
+    const tfjsVariants = [160, 140, 180].map(t => thresholdToCanvas(sourceCanvas, t, false));
+    for(const variant of tfjsVariants){
+      const tfjsCandidate = await recognizeDigitsWithTfjs(variant);
+      if(tfjsCandidate){
+        // TFJS の信頼度を高く評価（Tesseract より信頼性が高いことが多い）
+        candidates.push({ value: tfjsCandidate.value, confidence: Math.round((tfjsCandidate.score || 0) * 100), source: 'tfjs' });
+        if(tfjsCandidate.score >= 0.90) break;
+      }
     }
 
     if(!candidates.length) return null;
+    // 多数決を試す：同じ結果が複数あれば優先
+    const valueCounts = {};
+    candidates.forEach(c => {
+      valueCounts[c.value] = (valueCounts[c.value] || 0) + 1;
+    });
+    const maxCount = Math.max(...Object.values(valueCounts));
+    const consensusValues = Object.keys(valueCounts).filter(v => valueCounts[v] === maxCount);
+    
+    if(maxCount >= 2){
+      // 複数の候補が同じ結果を出している場合、それを優先
+      const consensusCandidate = candidates.find(c => consensusValues.includes(c.value));
+      if(consensusCandidate) return { ...consensusCandidate, confidence: 99 };
+    }
+    
     return candidates.sort((a, b) => rankCandidate(b) - rankCandidate(a))[0];
   }
 
   async function captureAndOcr(){
     if(uiState !== 'scanner') return;
-    if(ocrRunning) return; if(!videoEl || videoEl.readyState < 2) return;
+    if(ocrRunning) return;
+    if(!videoEl || videoEl.readyState < 2) return;
+    
     ocrRunning = true;
     try{
       const w = Math.min(videoEl.videoWidth || 480, 960);
       const h = Math.min(videoEl.videoHeight || 360, 540);
-      const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
-      const ctx = canvas.getContext('2d'); ctx.drawImage(videoEl, 0, 0, w, h);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoEl, 0, 0, w, h);
+      
       // 中央領域だけを使ってOCR精度を上げる
       const cropW = Math.floor(w * 0.56);
       const cropH = Math.floor(h * 0.28);
       const cropX = Math.floor((w - cropW) / 2);
       const cropY = Math.floor((h - cropH) / 2);
       const cropCanvas = document.createElement('canvas');
-      cropCanvas.width = cropW; cropCanvas.height = cropH;
+      cropCanvas.width = cropW;
+      cropCanvas.height = cropH;
       const cctx = cropCanvas.getContext('2d');
       cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
       const contentCanvas = cropToContent(cropCanvas);
-      const best = await recognizeFastThreeDigits(contentCanvas);
-      const orderFromFast = best && best.value ? findOrderByRaw(best.value) : null;
-      let finalBest = best;
-      if(!best || (typeof best.confidence === 'number' && best.confidence < 85) || !orderFromFast){
-        const accurate = await recognizeAccurateThreeDigits(contentCanvas);
-        if(accurate && (!finalBest || rankCandidate(accurate) > rankCandidate(finalBest))){
-          finalBest = accurate;
+      
+      // 現在のフレームをバッファに追加
+      frameBuffer.push(contentCanvas);
+      if(frameBuffer.length > FRAME_BUFFER_SIZE){
+        frameBuffer.shift();
+      }
+      
+      // バッファが満杯になったら、複数フレームの投票で結果を決定
+      if(frameBuffer.length >= 3){
+        const results = [];
+        for(const frameCanvas of frameBuffer){
+          const result = await recognizeFastThreeDigits(frameCanvas);
+          if(result && result.value){
+            results.push(result.value);
+          }
+        }
+        
+        if(results.length >= 2){
+          // 投票結果の集計
+          const resultCounts = {};
+          results.forEach(r => {
+            resultCounts[r] = (resultCounts[r] || 0) + 1;
+          });
+          
+          const maxCount = Math.max(...Object.values(resultCounts));
+          // 3フレーム中2フレーム以上が同じ結果を出しているか確認
+          if(maxCount >= 2){
+            const finalCode = Object.keys(resultCounts).find(v => resultCounts[v] === maxCount);
+            if(finalCode){
+              console.log('Multi-frame voting result:', finalCode, `(${maxCount}/${results.length} frames)`);
+              frameBuffer = [];
+              stopScanner();
+              askConfirmNumber(finalCode, 'multi-scan');
+              return;
+            }
+          }
         }
       }
-      if(finalBest && finalBest.value){
-        const code = normalizeDigits(finalBest.value).slice(-3);
-        if(code.length === 3){
-          stopScanner();
-          askConfirmNumber(code, finalBest.source || 'scan');
-          return;
-        }
-      }
-
-      // 1回では読めなかった場合は次フレームへ回す
+      
       ocrRunning = false;
       return;
-    }catch(e){ console.warn('OCR error', e); }
+    }catch(e){
+      console.warn('OCR error', e);
+    }
     ocrRunning = false;
   }
 
