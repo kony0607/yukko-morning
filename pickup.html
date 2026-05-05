@@ -114,7 +114,7 @@
   let cameraConstraintIndex = 0;
   let frameBuffer = [];
   const FRAME_BUFFER_SIZE = 2;
-  const ACCURACY_MODE_INTERVAL = 700; // 700msごとにOCRを実行
+  const ACCURACY_MODE_INTERVAL = 600; // 600msごとにOCRを実行
   const CAMERA_CONSTRAINTS = [
     { video: { facingMode: { ideal: 'environment' } }, audio: false },
     { video: { facingMode: { exact: 'environment' } }, audio: false },
@@ -643,7 +643,7 @@
     const candidates = [];
     const variants = preprocessForTesseract(sourceCanvas);
     // 並列にではなく、順序をつけてOCRを実行し、高い信頼度が得られたら早期終了
-    for(let i = 0; i < Math.min(variants.length, 6); i++){
+    for(let i = 0; i < Math.min(variants.length, 5); i++){
       try{
         const worker = await ensureTesseractWorker();
         if(!worker) continue;
@@ -669,7 +669,7 @@
     const worker = await ensureTesseractWorker();
     if(worker){
       const variants = preprocessForTesseract(sourceCanvas);
-      for(let i = 0; i < Math.min(variants.length, 8); i++){
+      for(let i = 0; i < Math.min(variants.length, 6); i++){
         try{
           const res = await worker.recognize(variants[i].toDataURL('image/png'));
           const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
