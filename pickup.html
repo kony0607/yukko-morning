@@ -548,7 +548,7 @@
         if(candidate){
           candidates.push({ value: candidate, confidence: Number(res?.data?.confidence || 0), source: 'tesseract' });
           // 信頼度が高い結果が得られたら早期確定
-          if(Number(res?.data?.confidence || 0) > 80 && i >= 1) break;
+          if(Number(res?.data?.confidence || 0) > 76 && i >= 1) break;
         }
       }catch(e){
         console.warn('tesseract variant failed', e);
@@ -654,7 +654,7 @@
           const conf = Number(res?.data?.confidence || 0);
           candidates.push({ value: candidate, source: 'tesseract-fast', confidence: conf });
           // 信頼度が十分に高い結果が得られたら早期確定
-          if(conf >= 85) break;
+          if(conf >= 82) break;
         }
       }catch(e){
         console.warn('fast OCR variant failed', e);
@@ -676,7 +676,7 @@
           const candidate = extractThreeDigits(text);
           if(candidate){
             candidates.push({ value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) });
-            if(Number(res?.data?.confidence || 0) >= 90) break;
+            if(Number(res?.data?.confidence || 0) >= 86) break;
           }
         }catch(e){
           console.warn('accurate OCR failed', e);
@@ -691,7 +691,7 @@
       if(tfjsCandidate){
         // TFJS の信頼度を高く評価（Tesseract より信頼性が高いことが多い）
         candidates.push({ value: tfjsCandidate.value, confidence: Math.round((tfjsCandidate.score || 0) * 100), source: 'tfjs' });
-        if(tfjsCandidate.score >= 0.85) break;
+        if(tfjsCandidate.score >= 0.80) break;
       }
     }
 
@@ -707,7 +707,7 @@
     if(maxCount >= 2){
       // 複数の候補が同じ結果を出している場合、それを優先
       const consensusCandidate = candidates.find(c => consensusValues.includes(c.value));
-      if(consensusCandidate) return { ...consensusCandidate, confidence: 95 };
+      if(consensusCandidate) return { ...consensusCandidate, confidence: 90 };
     }
     
     return candidates.sort((a, b) => rankCandidate(b) - rankCandidate(a))[0];
@@ -747,7 +747,7 @@
         const conf = currentResult.confidence || 0;
         
         // ★ルール1: 単一フレームで88%以上の信頼度があれば即確定
-        if(conf >= 88){
+        if(conf >= 82){
           console.log('High-confidence single frame result:', currentResult.value, `(${conf}% confidence)`);
           frameBuffer = [];
           stopScanner();
@@ -775,7 +775,7 @@
           
           // 同じ値が複数フレームで検出されたか、または信頼度が十分なら確定
           const hasDuplicate = Math.max(...Object.values(valueCounts)) >= 2;
-          const highConfidence = bestResult.confidence >= 80;
+          const highConfidence = bestResult.confidence >= 72;
           
           if(hasDuplicate || highConfidence){
             const finalValue = hasDuplicate 
