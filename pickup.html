@@ -31,6 +31,11 @@
     .overlay-card{max-width:90vw;max-width:min(420px,90vw);width:100%;background:#fff;border:1px solid #ddd;border-radius:16px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.12)}
     .overlay-title{font-size:16px;font-weight:800;margin-bottom:10px;text-align:center}
     .overlay-body{font-size:14px;color:#555;line-height:1.6;margin-bottom:12px;text-align:center}
+    .camera-help{background:#fff;border:1px solid #ddd;border-radius:14px;padding:14px;text-align:left}
+    .camera-help h4{margin:0 0 8px 0;font-size:16px}
+    .camera-help p{margin:0 0 8px 0;color:#555;font-size:13px;line-height:1.6}
+    .camera-help .help-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    .camera-help .help-actions button{min-width:140px}
     @media (max-width:600px){
       .wrap{padding:8px}
       .title{font-size:14px;margin-bottom:8px}
@@ -166,6 +171,38 @@
     const overlay = document.getElementById('overlayPrompt');
     overlay.classList.remove('on');
     overlay.innerHTML = '';
+  }
+
+  function showCameraHelp(message, detail){
+    const reader = document.getElementById('reader');
+    const safeMessage = message || 'カメラを起動できませんでした';
+    const safeDetail = detail || '';
+    reader.innerHTML = `
+      <div class="camera-help">
+        <h4>${safeMessage}</h4>
+        <p>${safeDetail}</p>
+        <p>この画面は <strong>file://</strong> ではカメラが使えません。<strong>http://localhost:3000/pickup.html</strong> で開いてください。</p>
+        <div class="help-actions">
+          <button class="btn btn-primary" onclick="openLocalPickup()">localhost版を開く</button>
+          <button class="btn btn-ghost" onclick="copyLocalPickupUrl()">URLをコピー</button>
+          <button class="btn btn-ghost" onclick="restartScanner()">再試行</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function openLocalPickup(){
+    window.location.href = 'http://localhost:3000/pickup.html';
+  }
+
+  async function copyLocalPickupUrl(){
+    const url = 'http://localhost:3000/pickup.html';
+    try{
+      await navigator.clipboard.writeText(url);
+      showMessage('localhost のURLをコピーしました。', 'muted');
+    }catch(e){
+      showMessage(url, 'muted');
+    }
   }
 
   function createCanvas(width, height){
@@ -495,15 +532,20 @@
     if(uiState !== 'scanner') return;
     const reader = document.getElementById('reader');
     const secureContext = window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ reader.innerHTML = '<div class="muted">カメラは HTTPS または localhost でしか利用できません。手入力または写真で読み取ってください。</div>'; return; }
+    if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      showCameraHelp('カメラ起動に失敗しました', 'ブラウザの制限で、この開き方ではカメラにアクセスできません。');
+      return;
+    }
     reader.innerHTML = '';
     videoEl = document.createElement('video');
     videoEl.setAttribute('playsinline', '');
+    videoEl.setAttribute('autoplay', '');
+    videoEl.muted = true;
     videoEl.style.width = '100%';
     videoEl.style.height = '100%';
     reader.appendChild(videoEl);
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream => {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }).then(stream => {
       videoStream = stream;
       videoEl.srcObject = stream;
       videoEl.play().catch(()=>{});
@@ -511,7 +553,15 @@
       if(ocrIntervalId) clearInterval(ocrIntervalId);
       ocrIntervalId = setInterval(captureAndOcr, 700);
     }).catch(err => {
-      reader.innerHTML = '<div class="muted">カメラ起動に失敗しました。権限または端末の設定を確認してください。</div>';
+      const name = err && err.name ? err.name : 'CameraError';
+      const detail = name === 'NotAllowedError'
+        ? 'カメラの許可が拒否されています。ブラウザ設定で許可してください。'
+        : name === 'NotFoundError'
+          ? '利用できるカメラが見つかりません。端末側のカメラアプリが使用中でないか確認してください。'
+          : name === 'NotReadableError'
+            ? 'カメラが他のアプリで使用中の可能性があります。'
+            : `詳細: ${name}`;
+      showCameraHelp('カメラ起動に失敗しました', detail);
     });
   }
 
@@ -564,11 +614,13 @@
       cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
       const contentCanvas = cropToContent(cropCanvas);
       const best = await recognizeFastThreeDigits(contentCanvas);
-      if(best && best.value){
-        const code = normalizeDigits(best.value).slice(-3);
+      const tfjsBest = best ? null : await recognizeDigitsWithTfjs(thresholdToCanvas(contentCanvas, 160, false));
+      const finalBest = best || tfjsBest;
+      if(finalBest && finalBest.value){
+        const code = normalizeDigits(finalBest.value).slice(-3);
         if(code.length === 3){
           stopScanner();
-          askConfirmNumber(code, best.source || 'scan');
+          askConfirmNumber(code, finalBest.source || 'scan');
           return;
         }
       }
@@ -746,6 +798,7 @@
 
   if(firebaseEnabled) syncFromFirebase();
   ensureTesseractWorker();
+  loadDigitModel();
   setUiState('scanner'); startScanner();
   </script>
 </body>
