@@ -513,24 +513,32 @@
     if(!container) return;
     const year = displayYear;
     const month = displayMonth;
-    const prefix = `${year}-${String(month+1).padStart(2,'0')}-`;
-    let totals = { total:0, wa:0, morning:0, morning_set:0, revenue:0 };
-    DAILY_SUMMARIES.forEach(day => {
-      if(!day || !day.date || !day.date.startsWith(prefix)) return;
-      const counts = day.counts || {};
-      totals.total += counts.total || 0;
-      totals.wa += counts.wa || 0;
-      totals.morning += counts.morning || 0;
-      totals.morning_set += counts.morning_set || 0;
-    });
-    totals.revenue = (totals.wa * (BENTO_INFO.wa.price || 0)) + (totals.morning * (BENTO_INFO.morning.price || 0)) + (totals.morning_set * (BENTO_INFO.morning_set.price || 0));
+    const map = {};
+    DAILY_SUMMARIES.forEach(d => { if(d && d.date) map[d.date] = d.counts || {}; });
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    let total = 0;
+    let revenue = 0;
+    const rows = [];
+    for(let d = 1; d <= daysInMonth; d++){
+      const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const counts = map[key] || {};
+      const dayRevenue = (counts.wa || 0) * (BENTO_INFO.wa.price || 0) + (counts.morning || 0) * (BENTO_INFO.morning.price || 0) + (counts.morning_set || 0) * (BENTO_INFO.morning_set.price || 0);
+      total += counts.total || 0;
+      revenue += dayRevenue;
+      rows.push(`<tr><td>${String(d).padStart(2,'0')}日</td><td>${counts.total || 0}</td><td>${counts.wa || 0}</td><td>${counts.morning || 0}</td><td>${counts.morning_set || 0}</td><td>¥${dayRevenue}</td></tr>`);
+    }
     container.innerHTML = `
-      <div class="day-line">表示月: ${year}年${month + 1}月</div>
-      <div class="day-line">個数: ${totals.total}</div>
-      <div class="day-line">和食: ${totals.wa}</div>
-      <div class="day-line">モーニング: ${totals.morning}</div>
-      <div class="day-line">モーニングセット: ${totals.morning_set}</div>
-      <div class="day-line"><strong>売上: ¥${totals.revenue}</strong></div>`;
+      <div class="day-line" style="margin-bottom:8px;">表示月: ${year}年${month + 1}月</div>
+      <div class="day-line" style="margin-bottom:8px;">月合計: ${total}個 / 売上 ¥${revenue}</div>
+      <div class="muted" style="margin-bottom:8px;">この表は <strong>締め保存した日</strong> のみ個数が入り、未締め日は 0 のままです。</div>
+      <div style="max-height:360px;overflow:auto;border:1px solid #eee;border-radius:10px;">
+        <table class="summary-table" style="border:none;border-radius:0;min-width:100%;">
+          <thead>
+            <tr><th>日</th><th>個数</th><th>和食</th><th>モーニング</th><th>セット</th><th>売上</th></tr>
+          </thead>
+          <tbody>${rows.join('')}</tbody>
+        </table>
+      </div>`;
   }
 
   if(firebaseEnabled){ sync(); syncSummaries(); }

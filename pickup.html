@@ -26,7 +26,6 @@
     .confirm-code{font-size:44px;font-weight:800;line-height:1;text-align:center;margin-bottom:8px}
     .confirm-text{text-align:center;color:#666;margin-bottom:10px}
     .confirm-row{display:flex;gap:8px;justify-content:center}
-    .overlay-lock{pointer-events:none;opacity:.45;user-select:none}
     .overlay-prompt{position:fixed;inset:0;background:rgba(246,243,234,.92);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}
     .overlay-prompt.on{display:flex}
     .overlay-card{max-width:420px;width:100%;background:#fff;border:1px solid #ddd;border-radius:16px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.12)}
@@ -117,7 +116,6 @@
     interactive.forEach(el => {
       el.disabled = nextState !== 'scanner';
     });
-    document.body.classList.toggle('overlay-lock', nextState !== 'scanner');
   }
 
   function showOverlay(title, body, buttons){
