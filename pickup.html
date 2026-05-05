@@ -46,7 +46,7 @@
       <input id="manualInput" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="呼び出し番号（3桁）" style="flex:1;padding:10px;border-radius:8px;border:1px solid #ddd;" oninput="this.value=this.value.replace(/\D/g,'').slice(0,3)" onkeydown="if(event.key==='Enter')onManualConfirm()" />
       <button class="btn btn-primary" onclick="onManualConfirm()">確認</button>
     </div>
-    <div class="note">1回目のスキャン → 受付（席へ戻す）。2回目のスキャン → 提供済みにします。20秒以内の連続スキャンは誤操作として無視されます。</div>
+    <div class="note">1回目のスキャン → 受付（席へ戻す）。2回目のスキャン → 提供済みにします。10秒以内の連続スキャンは誤操作として無視されます。</div>
     <div id="pickupResult"></div>
   </div>
 
@@ -75,6 +75,7 @@
   let ocrIntervalId = null;
   let ocrRunning = false;
   let pendingScanCode = '';
+  let pendingScanSource = 'scan';
 
   function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
   function buildCodeCandidates(raw){
@@ -186,8 +187,9 @@
     ocrRunning = false;
   }
 
-  function askConfirmNumber(code){
+  function askConfirmNumber(code, source = 'scan'){
     pendingScanCode = normalizeDigits(code).slice(-3);
+    pendingScanSource = source;
     const root = document.getElementById('pickupResult');
     root.innerHTML = '';
     const box = document.createElement('div'); box.className = 'confirm';
@@ -207,31 +209,85 @@
     const code = pendingScanCode;
     pendingScanCode = '';
     if(!code){ restartScanner(); return; }
-    processScan(code);
+    applyConfirmedCode(code);
   }
 
   function confirmScanNo(){
     pendingScanCode = '';
-    document.getElementById('pickupResult').innerHTML = '<div class="muted">再読み取りしてください。</div>';
-    setTimeout(()=> restartScanner(), 500);
+    showManualCorrectionPrompt('');
   }
 
-  async function processScan(raw){
-    const now = Date.now();
-    const order = findOrderByRaw(raw);
-    if(!order){
-      const code = normalizeDigits(raw).slice(-3);
-      document.getElementById('pickupResult').innerHTML = `
-        <div class="confirm">
-          <div class="confirm-code">${code || '---'}</div>
-          <div class="confirm-text">この番号は未登録です。新規注文を作成しますか？</div>
-          <div class="confirm-row">
-            <button class="btn btn-primary" onclick="goNewOrder('${code || ''}')">作成する</button>
-            <button class="btn btn-ghost" onclick="restartScanner()">戻る</button>
-          </div>
-        </div>`;
+  function showManualCorrectionPrompt(initialValue){
+    const root = document.getElementById('pickupResult');
+    const safeValue = normalizeDigits(initialValue || '').slice(0,3);
+    root.innerHTML = '';
+    const box = document.createElement('div'); box.className = 'confirm';
+    const txt = document.createElement('div'); txt.className = 'confirm-text'; txt.textContent = '読み取り内容が違っていたら、番号を入力してください。';
+    const input = document.createElement('input');
+    input.type = 'tel';
+    input.inputMode = 'numeric';
+    input.maxLength = 3;
+    input.value = safeValue;
+    input.style.cssText = 'width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;font-size:18px;text-align:center;box-sizing:border-box;margin-bottom:10px;';
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g,'').slice(0,3); });
+    input.addEventListener('keydown', (ev) => { if(ev.key === 'Enter') confirmManualCorrection(input.value); });
+    const row = document.createElement('div'); row.className = 'confirm-row';
+    const ok = document.createElement('button'); ok.className = 'btn btn-primary'; ok.textContent = '入力して確認';
+    const retry = document.createElement('button'); retry.className = 'btn btn-ghost'; retry.textContent = '再読み取り';
+    ok.addEventListener('click', () => confirmManualCorrection(input.value));
+    retry.addEventListener('click', () => restartScanner());
+    row.appendChild(ok); row.appendChild(retry);
+    box.appendChild(txt); box.appendChild(input); box.appendChild(row);
+    root.appendChild(box);
+    setTimeout(() => input.focus(), 0);
+  }
+
+  function confirmManualCorrection(value){
+    const v = normalizeDigits(value).slice(0,3);
+    if(!v){
+      showManualCorrectionPrompt('');
       return;
     }
+    pendingScanCode = '';
+    processScan(v, 'manual');
+  }
+
+  async function applyConfirmedCode(code){
+    await processScan(code, 'confirmed');
+  }
+
+  async function processScan(raw, source = 'scan'){
+    const order = findOrderByRaw(raw);
+    if(!order){
+      if(source === 'manual'){
+        showNewOrderPrompt(normalizeDigits(raw).slice(-3));
+      } else {
+        showManualCorrectionPrompt(raw);
+      }
+      return;
+    }
+    await handleKnownOrder(order, raw, source);
+  }
+
+  function showNewOrderPrompt(code){
+    const root = document.getElementById('pickupResult');
+    const safeCode = normalizeDigits(code || '').slice(-3);
+    root.innerHTML = '';
+    const box = document.createElement('div'); box.className = 'confirm';
+    const codeEl = document.createElement('div'); codeEl.className = 'confirm-code'; codeEl.textContent = safeCode || '---';
+    const txt = document.createElement('div'); txt.className = 'confirm-text'; txt.textContent = 'この番号は未登録です。新規注文を作成しますか？';
+    const row = document.createElement('div'); row.className = 'confirm-row';
+    const create = document.createElement('button'); create.className = 'btn btn-primary'; create.textContent = '作成する';
+    const back = document.createElement('button'); back.className = 'btn btn-ghost'; back.textContent = '戻る';
+    create.addEventListener('click', () => goNewOrder(safeCode));
+    back.addEventListener('click', () => restartScanner());
+    row.appendChild(create); row.appendChild(back);
+    box.appendChild(codeEl); box.appendChild(txt); box.appendChild(row);
+    root.appendChild(box);
+  }
+
+  async function handleKnownOrder(order, raw, source = 'scan'){
+    const now = Date.now();
     if(order.served){ showMessage('この注文は既に提供済みです。','muted'); return; }
     const last = order.lastScanAt ? new Date(order.lastScanAt).getTime() : 0;
     if(last && (now - last) < IGNORE_WINDOW_MS){ showMessage('連続スキャンと判断しました（ミス）。しばらく待ってください。','muted'); return; }
@@ -260,7 +316,7 @@
   function onManualConfirm(){
     const v = document.getElementById('manualInput').value.trim().replace(/\D/g,'').slice(0,3);
     if(!v) return;
-    askConfirmNumber(v);
+    askConfirmNumber(v, 'manual');
     document.getElementById('manualInput').value = '';
   }
   async function updateOrder(order){ if(!firebaseEnabled || !database) return; try{ await database.ref('orders/' + order.firebaseKey).update({ checkedInAt: order.checkedInAt || null, lastScanAt: order.lastScanAt || null, served: !!order.served, servedAt: order.servedAt || null, status: order.status || null }); }catch(e){ console.error('Firebase update failed', e); } }
