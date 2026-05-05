@@ -111,6 +111,13 @@
   let uiState = 'scanner';
   let pendingOrder = null;
   let cameraStartRetryCount = 0;
+  let cameraConstraintIndex = 0;
+  const CAMERA_CONSTRAINTS = [
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: { facingMode: { exact: 'environment' } }, audio: false },
+    { video: { facingMode: { ideal: 'user' } }, audio: false },
+    { video: true, audio: false }
+  ];
 
   function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
   function buildCodeCandidates(raw){
@@ -477,7 +484,15 @@
   }
 
   function extractThreeDigits(text){
-    const digits = normalizeDigits(text);
+    const digits = normalizeDigits(String(text || '')
+      .replace(/[oOqQD]/g, '0')
+      .replace(/[iIlL|!]/g, '1')
+      .replace(/[zZ]/g, '2')
+      .replace(/[sS$]/g, '5')
+      .replace(/[bB]/g, '8')
+      .replace(/[gG]/g, '6')
+      .replace(/[tT]/g, '7')
+      .replace(/[aA]/g, '4'));
     if(!digits) return null;
     const direct = digits.match(/\d{3}/);
     if(direct) return direct[0];
@@ -546,8 +561,10 @@
     videoEl.style.height = '100%';
     reader.appendChild(videoEl);
 
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }).then(stream => {
+    const constraints = CAMERA_CONSTRAINTS[cameraConstraintIndex] || CAMERA_CONSTRAINTS[0];
+    navigator.mediaDevices.getUserMedia(constraints).then(stream => {
       cameraStartRetryCount = 0;
+      cameraConstraintIndex = 0;
       videoStream = stream;
       videoEl.srcObject = stream;
       videoEl.play().catch(()=>{});
@@ -556,6 +573,14 @@
       ocrIntervalId = setInterval(captureAndOcr, 700);
     }).catch(err => {
       const name = err && err.name ? err.name : 'CameraError';
+      if(cameraConstraintIndex < CAMERA_CONSTRAINTS.length - 1){
+        cameraConstraintIndex += 1;
+        reader.innerHTML = '<div class="muted" style="padding:12px;text-align:center;">カメラ設定を切り替えています...</div>';
+        setTimeout(() => {
+          if(uiState === 'scanner') startScanner();
+        }, 500);
+        return;
+      }
       if((name === 'NotReadableError' || name === 'AbortError') && cameraStartRetryCount < 3){
         cameraStartRetryCount += 1;
         reader.innerHTML = `<div class="muted" style="padding:12px;text-align:center;">カメラを準備中です...(${cameraStartRetryCount}/3)</div>`;
@@ -577,13 +602,28 @@
 
   function stopScanner(){
     if(ocrIntervalId){ clearInterval(ocrIntervalId); ocrIntervalId = null; }
-    if(videoEl && videoEl.pause) try{ videoEl.pause(); }catch(e){}
-    if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream = null; }
+    if(videoEl){
+      try{ videoEl.pause(); }catch(e){}
+      try{ videoEl.srcObject = null; }catch(e){}
+    }
+    if(videoStream){
+      videoStream.getTracks().forEach(t=>t.stop());
+      videoStream = null;
+    }
     const reader = document.getElementById('reader'); if(reader) reader.innerHTML = 'カメラを停止しました';
     html5QrCode = null;
     ocrRunning = false;
   }
-  function restartScanner(){ hideOverlay(); setUiState('scanner'); stopScanner(); ocrRunning = false; startScanner(); }
+  function restartScanner(){
+    hideOverlay();
+    setUiState('scanner');
+    stopScanner();
+    ocrRunning = false;
+    cameraStartRetryCount = 0;
+    setTimeout(() => {
+      if(uiState === 'scanner') startScanner();
+    }, 350);
+  }
 
   async function recognizeFastThreeDigits(sourceCanvas){
     const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
