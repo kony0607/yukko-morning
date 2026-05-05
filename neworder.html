@@ -148,7 +148,9 @@
       quantity: qty,
       price: BENTO_INFO[bento]?.price || 0,
       rice: 0,
-      served:false,
+      served: false,
+      status: 'checked-in',
+      checkedInAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       source: 'pickup-new'
     };

@@ -11,26 +11,41 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
   <style>
     body{font-family:Meiryo, 'Noto Sans JP',sans-serif;margin:0;background:#f6f3ea;color:#1d1b16}
-    .wrap{max-width:720px;margin:0 auto;padding:18px}
-    .title{font-size:18px;font-weight:700;margin-bottom:10px}
-    #reader{width:100%;height:320px;background:#fff;border-radius:12px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center}
-    .note{margin-top:12px;color:#666}
-    .big{font-size:36px;font-weight:800;text-align:center;margin-top:18px}
-    .muted{color:#888}
-    .btn-row{display:flex;gap:8px;margin-top:12px}
-    .btn{padding:10px 12px;border-radius:10px;border:0;cursor:pointer}
+    .wrap{max-width:720px;margin:0 auto;padding:12px}
+    .title{font-size:16px;font-weight:700;margin-bottom:10px}
+    #reader{width:100%;height:280px;background:#fff;border-radius:12px;border:1px solid #ddd;display:flex;align-items:center;justify-content:center}
+    .note{margin-top:12px;color:#666;font-size:13px;line-height:1.5}
+    .big{font-size:32px;font-weight:800;text-align:center;margin-top:18px}
+    .muted{color:#888;font-size:13px}
+    .btn-row{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+    .btn{padding:8px 10px;border-radius:10px;border:0;cursor:pointer;font-size:14px;flex:1;min-width:100px}
     .btn-primary{background:#1d6b4b;color:#fff}
     .btn-ghost{background:#fff;border:1px solid #ddd}
     #pickupResult{margin-top:14px}
     .confirm{margin-top:14px;background:#fff;border:1px solid #ddd;border-radius:12px;padding:12px}
-    .confirm-code{font-size:44px;font-weight:800;line-height:1;text-align:center;margin-bottom:8px}
-    .confirm-text{text-align:center;color:#666;margin-bottom:10px}
+    .confirm-code{font-size:40px;font-weight:800;line-height:1;text-align:center;margin-bottom:8px}
+    .confirm-text{text-align:center;color:#666;margin-bottom:10px;font-size:14px}
     .confirm-row{display:flex;gap:8px;justify-content:center}
-    .overlay-prompt{position:fixed;inset:0;background:rgba(246,243,234,.92);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}
+    .overlay-prompt{position:fixed;inset:0;background:rgba(246,243,234,.92);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px}
     .overlay-prompt.on{display:flex}
-    .overlay-card{max-width:420px;width:100%;background:#fff;border:1px solid #ddd;border-radius:16px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.12)}
-    .overlay-title{font-size:18px;font-weight:800;margin-bottom:10px;text-align:center}
-    .overlay-body{font-size:15px;color:#555;line-height:1.7;margin-bottom:12px;text-align:center}
+    .overlay-card{max-width:90vw;max-width:min(420px,90vw);width:100%;background:#fff;border:1px solid #ddd;border-radius:16px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.12)}
+    .overlay-title{font-size:16px;font-weight:800;margin-bottom:10px;text-align:center}
+    .overlay-body{font-size:14px;color:#555;line-height:1.6;margin-bottom:12px;text-align:center}
+    @media (max-width:600px){
+      .wrap{padding:8px}
+      .title{font-size:14px;margin-bottom:8px}
+      #reader{height:240px}
+      .btn{padding:6px 8px;font-size:13px}
+      .big{font-size:28px}
+      .note{font-size:12px}
+      .manual input{font-size:16px}
+    }
+    @media (max-width:380px){
+      .btn-row{gap:4px}
+      .btn{font-size:12px;padding:6px 6px}
+      #reader{height:200px}
+      .overlay-card{max-width:92vw}
+    }
   </style>
 </head>
 <body>
@@ -193,19 +208,23 @@
   function buildThresholdCandidates(sourceCanvas){
     const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
     const { avg } = getImageLumaArray(src);
-    const candidates = [];
     const base = Math.max(70, Math.min(190, avg));
-    [0.78, 0.86, 0.94, 1.02, 1.10].forEach(multiplier => candidates.push(Math.round(base * multiplier)));
-    [90, 105, 120, 135, 150, 165].forEach(v => candidates.push(v));
-    return Array.from(new Set(candidates.filter(v => v >= 40 && v <= 220))).sort((a, b) => a - b);
+    // 候補を大幅に削減（本来の11個 → 4個）
+    return [
+      Math.round(base * 0.90),
+      Math.round(base * 1.00),
+      Math.round(base * 1.10),
+      Math.round(base * 1.20)
+    ].filter(v => v >= 40 && v <= 220);
   }
 
   function preprocessForTesseract(sourceCanvas){
     const variants = [];
     const thresholds = buildThresholdCandidates(sourceCanvas);
-    thresholds.forEach(threshold => {
+    // 最初の2つは通常と反転、残りは通常のみ（高速化）
+    thresholds.forEach((threshold, idx) => {
       variants.push(thresholdToCanvas(sourceCanvas, threshold, false));
-      variants.push(thresholdToCanvas(sourceCanvas, threshold, true));
+      if(idx < 2) variants.push(thresholdToCanvas(sourceCanvas, threshold, true));
     });
     return variants;
   }
@@ -428,6 +447,8 @@
         const candidate = extractThreeDigits(text);
         if(candidate){
           candidates.push({ value: candidate, confidence: Number(res?.data?.confidence || 0), source: 'tesseract' });
+          // 信頼度が高い結果が得られたら早期確定
+          if(Number(res?.data?.confidence || 0) > 80 && i >= 1) break;
         }
       }catch(e){
         console.warn('tesseract variant failed', e);
