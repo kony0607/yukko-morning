@@ -43,6 +43,11 @@
     .calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
     .calendar-cell{background:#fff;border:1px solid #eee;border-radius:8px;padding:8px;min-height:70px}
     .calendar-cell .day-num{font-weight:800;margin-bottom:6px}
+    .summary-table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #eee;border-radius:12px;overflow:hidden}
+    .summary-table th,.summary-table td{padding:8px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:right;vertical-align:middle}
+    .summary-table th:first-child,.summary-table td:first-child{text-align:left}
+    .summary-table thead th{background:#f8f6ef;color:#444;font-weight:800}
+    .summary-table tr:last-child td{border-bottom:none}
     @media (max-width:900px){
       .grid{grid-template-columns:1fr}
       .form-grid{grid-template-columns:1fr 1fr}
@@ -436,7 +441,7 @@
   function renderSummaryList(){
     const container = document.getElementById('summaryList');
     if(!container) return;
-    // 月カレンダーレイアウト表示（displayYear/displayMonth）
+    // 月テーブル表示（displayYear/displayMonth）
     const year = displayYear;
     const month = displayMonth;
     // map 日付->counts
@@ -445,39 +450,60 @@
     const first = new Date(year, month, 1);
     const last = new Date(year, month + 1, 0);
     const daysInMonth = last.getDate();
-    const startWeek = first.getDay();
-    let cells = [];
-    // 空セル
-    for(let i=0;i<startWeek;i++) cells.push('');
+    const rows = [];
     for(let d=1; d<=daysInMonth; d++){
       const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
       const counts = map[key] || {};
-      const html = `<div class="calendar-cell"><div class="day-num">${d}</div><div class="day-line">全:${counts.total||0}</div><div class="day-line">和:${counts.wa||0}</div><div class="day-line">モ:${counts.morning||0}</div></div>`;
-      cells.push(html);
+      const day = new Date(year, month, d);
+      const label = `${String(month + 1).padStart(2, '0')}/${String(d).padStart(2, '0')} ${['日','月','火','水','木','金','土'][day.getDay()]}`;
+      rows.push(`
+        <tr>
+          <td>${label}</td>
+          <td>${counts.total || 0}</td>
+          <td>${counts.wa || 0}</td>
+          <td>${counts.morning || 0}</td>
+          <td>${counts.morning_set || 0}</td>
+          <td>¥${((counts.wa || 0) * (BENTO_INFO.wa.price || 0) + (counts.morning || 0) * (BENTO_INFO.morning.price || 0) + (counts.morning_set || 0) * (BENTO_INFO.morning_set.price || 0))}</td>
+        </tr>`);
     }
-    // fill trailing cells to make full weeks
-    while(cells.length % 7 !== 0) cells.push('');
-    // ヘッダー（前月/次月）とカレンダー
+
+    const monthTotals = rows.reduce((acc, _, index) => {
+      const d = index + 1;
+      const key = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const counts = map[key] || {};
+      acc.total += counts.total || 0;
+      acc.wa += counts.wa || 0;
+      acc.morning += counts.morning || 0;
+      acc.morning_set += counts.morning_set || 0;
+      return acc;
+    }, { total:0, wa:0, morning:0, morning_set:0 });
+    const revenue = (monthTotals.wa * (BENTO_INFO.wa.price||0)) + (monthTotals.morning * (BENTO_INFO.morning.price||0)) + (monthTotals.morning_set * (BENTO_INFO.morning_set.price||0));
+
     container.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
         <div style="display:flex;gap:8px;align-items:center;">
           <button class="btn btn-ghost" id="prevMonth">◀</button>
-          <strong>${year}年 ${month+1}月</strong>
+          <strong>${year}年 ${month + 1}月</strong>
           <button class="btn btn-ghost" id="nextMonth">▶</button>
         </div>
-        <div style="font-weight:700">月集計: <span id="monthTotals">---</span></div>
+        <div style="font-weight:700">月集計: 個数 ${monthTotals.total} / 売上 ¥${revenue}</div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;background:transparent;font-weight:700;padding:6px"><div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div></div>
-      <div class="calendar-grid">${cells.join('')}</div>`;
+      <table class="summary-table">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>個数</th>
+            <th>和食</th>
+            <th>モーニング</th>
+            <th>モーニングセット</th>
+            <th>売上</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.join('')}
+        </tbody>
+      </table>`;
 
-    // 月集計を計算して表示
-    const monthKeyPrefix = `${year}-${String(month+1).padStart(2,'0')}-`;
-    let monthTotals = { total:0, wa:0, morning:0, morning_set:0 };
-    Object.keys(map).forEach(k => { if(k.startsWith(monthKeyPrefix)){ const c = map[k] || {}; monthTotals.total += (c.total||0); monthTotals.wa += (c.wa||0); monthTotals.morning += (c.morning||0); monthTotals.morning_set += (c.morning_set||0); } });
-    const revenue = (monthTotals.wa * (BENTO_INFO.wa.price||0)) + (monthTotals.morning * (BENTO_INFO.morning.price||0)) + (monthTotals.morning_set * (BENTO_INFO.morning_set.price||0));
-    document.getElementById('monthTotals').textContent = `個数:${monthTotals.total} (和:${monthTotals.wa} / モ:${monthTotals.morning} / MS:${monthTotals.morning_set})  売上: ¥${revenue}`;
-
-    // 月切替ボタンのイベント
     document.getElementById('prevMonth').addEventListener('click', ()=>{ displayMonth--; if(displayMonth<0){ displayMonth=11; displayYear--; } renderSummaryList(); });
     document.getElementById('nextMonth').addEventListener('click', ()=>{ displayMonth++; if(displayMonth>11){ displayMonth=0; displayYear++; } renderSummaryList(); });
   }
