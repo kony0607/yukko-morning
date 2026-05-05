@@ -8,6 +8,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
   <style>
     body{font-family:Meiryo, 'Noto Sans JP',sans-serif;margin:0;background:#f6f3ea;color:#1d1b16}
     .wrap{max-width:720px;margin:0 auto;padding:18px}
@@ -69,6 +70,7 @@
   const ORDERS = [];
   let html5QrCode = null;
   const IGNORE_WINDOW_MS = 10 * 1000; // 10秒
+  const MNIST_MODEL_URL = 'https://storage.googleapis.com/tfjs-models/tfjs/mnist/model.json';
   // OCR カメラ用
   let videoEl = null;
   let videoStream = null;
@@ -76,6 +78,8 @@
   let ocrRunning = false;
   let pendingScanCode = '';
   let pendingScanSource = 'scan';
+  let digitModel = null;
+  let digitModelReady = null;
 
   function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
   function buildCodeCandidates(raw){
@@ -91,10 +95,296 @@
     return ORDERS.find(o => !o.served && cands.some(c=> o.lockerFull===c || o.callCode===c));
   }
 
+  function createCanvas(width, height){
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+  }
+
+  function getImageLumaArray(imageData){
+    const luma = new Uint8ClampedArray((imageData.data.length / 4) | 0);
+    let sum = 0;
+    for(let i = 0, j = 0; i < imageData.data.length; i += 4, j++){
+      const r = imageData.data[i];
+      const g = imageData.data[i + 1];
+      const b = imageData.data[i + 2];
+      const v = 0.299 * r + 0.587 * g + 0.114 * b;
+      luma[j] = v;
+      sum += v;
+    }
+    return { luma, avg: sum / Math.max(1, luma.length) };
+  }
+
+  function thresholdToCanvas(sourceCanvas, threshold, invert = false){
+    const out = createCanvas(sourceCanvas.width, sourceCanvas.height);
+    const ctx = out.getContext('2d');
+    const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const img = ctx.createImageData(sourceCanvas.width, sourceCanvas.height);
+    const { luma } = getImageLumaArray(src);
+    for(let i = 0, j = 0; i < img.data.length; i += 4, j++){
+      const ink = luma[j] < threshold;
+      const v = invert ? (ink ? 255 : 0) : (ink ? 0 : 255);
+      img.data[i] = v;
+      img.data[i + 1] = v;
+      img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return out;
+  }
+
+  function buildThresholdCandidates(sourceCanvas){
+    const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const { avg } = getImageLumaArray(src);
+    const candidates = [];
+    const base = Math.max(70, Math.min(190, avg));
+    [0.78, 0.86, 0.94, 1.02, 1.10].forEach(multiplier => candidates.push(Math.round(base * multiplier)));
+    [90, 105, 120, 135, 150, 165].forEach(v => candidates.push(v));
+    return Array.from(new Set(candidates.filter(v => v >= 40 && v <= 220))).sort((a, b) => a - b);
+  }
+
+  function preprocessForTesseract(sourceCanvas){
+    const variants = [];
+    const thresholds = buildThresholdCandidates(sourceCanvas);
+    thresholds.forEach(threshold => {
+      variants.push(thresholdToCanvas(sourceCanvas, threshold, false));
+      variants.push(thresholdToCanvas(sourceCanvas, threshold, true));
+    });
+    return variants;
+  }
+
+  function cropToContent(sourceCanvas){
+    const ctx = sourceCanvas.getContext('2d');
+    const img = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+    const { luma } = getImageLumaArray(img);
+    let minX = sourceCanvas.width;
+    let minY = sourceCanvas.height;
+    let maxX = -1;
+    let maxY = -1;
+    const threshold = 220;
+    for(let y = 0; y < sourceCanvas.height; y++){
+      for(let x = 0; x < sourceCanvas.width; x++){
+        const value = luma[y * sourceCanvas.width + x];
+        if(value < threshold){
+          if(x < minX) minX = x;
+          if(x > maxX) maxX = x;
+          if(y < minY) minY = y;
+          if(y > maxY) maxY = y;
+        }
+      }
+    }
+    if(maxX < minX || maxY < minY){
+      return sourceCanvas;
+    }
+    const padX = Math.max(4, Math.floor((maxX - minX) * 0.08));
+    const padY = Math.max(4, Math.floor((maxY - minY) * 0.20));
+    const cropX = Math.max(0, minX - padX);
+    const cropY = Math.max(0, minY - padY);
+    const cropW = Math.min(sourceCanvas.width - cropX, (maxX - minX) + padX * 2 + 1);
+    const cropH = Math.min(sourceCanvas.height - cropY, (maxY - minY) + padY * 2 + 1);
+    const out = createCanvas(cropW, cropH);
+    out.getContext('2d').drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+    return out;
+  }
+
+  function centerPadCanvas(sourceCanvas, size = 28, invert = false){
+    const out = createCanvas(size, size);
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = invert ? '#000' : '#fff';
+    ctx.fillRect(0, 0, size, size);
+
+    const inner = Math.min(size - 4, Math.max(1, Math.floor(size * 0.72)));
+    const scale = Math.min(inner / sourceCanvas.width, inner / sourceCanvas.height);
+    const drawW = Math.max(1, Math.round(sourceCanvas.width * scale));
+    const drawH = Math.max(1, Math.round(sourceCanvas.height * scale));
+    const offsetX = Math.floor((size - drawW) / 2);
+    const offsetY = Math.floor((size - drawH) / 2);
+    ctx.drawImage(sourceCanvas, offsetX, offsetY, drawW, drawH);
+    return out;
+  }
+
+  function segmentDigitRegions(binaryCanvas){
+    const ctx = binaryCanvas.getContext('2d');
+    const img = ctx.getImageData(0, 0, binaryCanvas.width, binaryCanvas.height);
+    const { luma } = getImageLumaArray(img);
+    const colHasInk = new Array(binaryCanvas.width).fill(false);
+    for(let x = 0; x < binaryCanvas.width; x++){
+      for(let y = 0; y < binaryCanvas.height; y++){
+        const value = luma[y * binaryCanvas.width + x];
+        if(value < 180){
+          colHasInk[x] = true;
+          break;
+        }
+      }
+    }
+
+    const segments = [];
+    let start = -1;
+    for(let x = 0; x < colHasInk.length; x++){
+      if(colHasInk[x] && start === -1){ start = x; }
+      if((!colHasInk[x] || x === colHasInk.length - 1) && start !== -1){
+        const end = colHasInk[x] && x === colHasInk.length - 1 ? x : x - 1;
+        if(end >= start){ segments.push([start, end]); }
+        start = -1;
+      }
+    }
+
+    // 小さすぎる区間は除外し、近接区間は結合
+    const merged = [];
+    segments.forEach(seg => {
+      if(!merged.length){ merged.push(seg); return; }
+      const prev = merged[merged.length - 1];
+      if(seg[0] - prev[1] <= 3){ prev[1] = seg[1]; }
+      else merged.push(seg);
+    });
+    return merged.filter(seg => (seg[1] - seg[0] + 1) >= 4);
+  }
+
+  function createDigitCanvasFromBinary(binaryCanvas, segment){
+    const [startX, endX] = segment;
+    const ctx = binaryCanvas.getContext('2d');
+    const img = ctx.getImageData(startX, 0, endX - startX + 1, binaryCanvas.height);
+    const { luma } = getImageLumaArray(img);
+
+    let minY = binaryCanvas.height;
+    let maxY = -1;
+    for(let y = 0; y < binaryCanvas.height; y++){
+      for(let x = 0; x < endX - startX + 1; x++){
+        if(luma[y * (endX - startX + 1) + x] < 180){
+          if(y < minY) minY = y;
+          if(y > maxY) maxY = y;
+        }
+      }
+    }
+    if(maxY < minY){
+      return null;
+    }
+
+    const padY = Math.max(2, Math.floor((maxY - minY) * 0.15));
+    const cropY = Math.max(0, minY - padY);
+    const cropH = Math.min(binaryCanvas.height - cropY, (maxY - minY) + padY * 2 + 1);
+    const cropCanvas = createCanvas(endX - startX + 1, cropH);
+    cropCanvas.getContext('2d').drawImage(binaryCanvas, startX, cropY, endX - startX + 1, cropH, 0, 0, endX - startX + 1, cropH);
+    const padded = centerPadCanvas(cropCanvas, 28, true);
+    return padded;
+  }
+
+  async function loadDigitModel(){
+    if(digitModelReady) return digitModelReady;
+    digitModelReady = (async () => {
+      if(typeof tf === 'undefined' || !tf.loadLayersModel){
+        console.warn('TensorFlow.js が利用できません');
+        return null;
+      }
+      try{
+        digitModel = await tf.loadLayersModel(MNIST_MODEL_URL);
+        console.log('TensorFlow.js digit model loaded');
+        return digitModel;
+      }catch(e){
+        console.warn('TensorFlow.js digit model load failed', e);
+        digitModel = null;
+        return null;
+      }
+    })();
+    return digitModelReady;
+  }
+
+  async function classifyDigitCanvas(digitCanvas){
+    if(!digitModel) return null;
+    return tf.tidy(() => {
+      const tensor = tf.browser.fromPixels(digitCanvas, 1)
+        .toFloat()
+        .div(255.0)
+        .reshape([1, 28, 28, 1]);
+      const output = digitModel.predict(tensor);
+      const probs = Array.from(output.dataSync());
+      let bestIndex = 0;
+      let bestProb = probs[0] || 0;
+      for(let i = 1; i < probs.length; i++){
+        if(probs[i] > bestProb){ bestProb = probs[i]; bestIndex = i; }
+      }
+      return { digit: String(bestIndex), confidence: bestProb };
+    });
+  }
+
+  async function recognizeDigitsWithTfjs(binaryCanvas){
+    if(!digitModel) return null;
+    const segments = segmentDigitRegions(binaryCanvas);
+    if(!segments.length || segments.length > 5) return null;
+    const digits = [];
+    let score = 0;
+    for(const segment of segments){
+      const digitCanvas = createDigitCanvasFromBinary(binaryCanvas, segment);
+      if(!digitCanvas) return null;
+      const result = await classifyDigitCanvas(digitCanvas);
+      if(!result) return null;
+      digits.push(result.digit);
+      score += result.confidence;
+    }
+    const value = digits.join('');
+    if(digits.length === 3){
+      return { value, score: score / 3 };
+    }
+    return null;
+  }
+
+  function extractThreeDigits(text){
+    const digits = normalizeDigits(text);
+    if(!digits) return null;
+    const direct = digits.match(/\d{3}/);
+    if(direct) return direct[0];
+    if(digits.length > 3){
+      return digits.slice(-3);
+    }
+    return digits.length === 3 ? digits : null;
+  }
+
+  function rankCandidate(candidate){
+    if(!candidate || !candidate.value) return -1;
+    const value = normalizeDigits(candidate.value).slice(0, 3);
+    if(value.length !== 3) return -1;
+    const parsed = Number(value);
+    if(Number.isNaN(parsed)) return -1;
+    const base = candidate.source === 'tfjs' ? 85 : 70;
+    const confidence = typeof candidate.confidence === 'number' ? candidate.confidence : 0;
+    return base + Math.min(25, confidence);
+  }
+
+  async function recognizeWithTesseractVariants(sourceCanvas){
+    const candidates = [];
+    const variants = preprocessForTesseract(sourceCanvas);
+    for(let i = 0; i < variants.length; i++){
+      try{
+        const variant = variants[i];
+        const res = await Tesseract.recognize(variant.toDataURL('image/png'), 'eng', {
+          logger: () => {},
+          tessedit_char_whitelist: '0123456789',
+          tessedit_pageseg_mode: 7,
+          user_defined_dpi: '300',
+          tessedit_enable_dict_correction: '0',
+          load_system_dawg: '0',
+          load_freq_dawg: '0',
+          classify_bln_numeric_mode: '1',
+          preserve_interword_spaces: '0'
+        });
+        const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
+        const candidate = extractThreeDigits(text);
+        if(candidate){
+          candidates.push({ value: candidate, confidence: Number(res?.data?.confidence || 0), source: 'tesseract' });
+        }
+      }catch(e){
+        console.warn('tesseract variant failed', e);
+      }
+    }
+    return candidates;
+  }
+
   function startScanner(){
     const reader = document.getElementById('reader');
     const secureContext = window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if(!secureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ reader.innerHTML = '<div class="muted">カメラは HTTPS または localhost でしか利用できません。手入力または写真で読み取ってください。</div>'; return; }
+    loadDigitModel();
     reader.innerHTML = '';
     videoEl = document.createElement('video');
     videoEl.setAttribute('playsinline', '');
@@ -140,49 +430,40 @@
       cropCanvas.width = cropW; cropCanvas.height = cropH;
       const cctx = cropCanvas.getContext('2d');
       cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      // 前処理: グレースケール -> 二値化 (簡易Otsuライク) -> 拡大
-      const img = cctx.getImageData(0,0,cropW,cropH);
-      // convert to luminance and compute average
-      let sum=0; const lum = new Uint8ClampedArray(cropW*cropH);
-      for(let i=0, j=0;i<img.data.length;i+=4, j++){
-        const r=img.data[i], g=img.data[i+1], b=img.data[i+2];
-        const l = 0.299*r + 0.587*g + 0.114*b; lum[j]=l; sum += l;
+      const contentCanvas = cropToContent(cropCanvas);
+      const candidates = [];
+
+      const tesseractCandidates = await recognizeWithTesseractVariants(contentCanvas);
+      tesseractCandidates.forEach(candidate => candidates.push(candidate));
+
+      await loadDigitModel();
+      if(digitModel){
+        const tfVariants = preprocessForTesseract(contentCanvas).filter((_, index) => index % 2 === 1);
+        for(const variant of tfVariants){
+          const classified = await recognizeDigitsWithTfjs(variant);
+          if(classified && classified.value && classified.value.length === 3){
+            candidates.push({ value: classified.value, confidence: classified.score * 100, source: 'tfjs' });
+          }
+        }
       }
-      const avg = sum / lum.length;
-      const threshold = Math.max(80, Math.min(160, avg * 0.9));
-      // apply binary
-      for(let i=0, j=0;i<img.data.length;i+=4, j++){
-        const v = lum[j] < threshold ? 0 : 255;
-        img.data[i]=img.data[i+1]=img.data[i+2]=v;
-        img.data[i+3]=255;
+
+      const best = candidates
+        .map(candidate => ({ ...candidate, rank: rankCandidate(candidate) }))
+        .filter(candidate => candidate.rank >= 0)
+        .sort((a, b) => b.rank - a.rank)[0];
+
+      if(best && best.value){
+        const code = normalizeDigits(best.value).slice(-3);
+        if(code.length === 3){
+          stopScanner();
+          askConfirmNumber(code, best.source || 'scan');
+          return;
+        }
       }
-      cctx.putImageData(img,0,0);
-      // scale up to improve OCR
-      const scale = Math.min(2, Math.max(1, Math.floor(1024 / Math.max(cropW, cropH))));
-      const bigW = Math.max(cropW * scale, cropW);
-      const bigH = Math.max(cropH * scale, cropH);
-      const bigCanvas = document.createElement('canvas'); bigCanvas.width = bigW; bigCanvas.height = bigH;
-      const bctx = bigCanvas.getContext('2d');
-      bctx.imageSmoothingEnabled = true; bctx.imageSmoothingQuality = 'high';
-      bctx.drawImage(cropCanvas, 0, 0, bigW, bigH);
-      const dataUrl = bigCanvas.toDataURL('image/png');
-      const res = await Tesseract.recognize(dataUrl, 'eng', {
-        logger: () => {},
-        tessedit_char_whitelist: '0123456789',
-        tessedit_pageseg_mode: 7
-      });
-      const text = (res && res.data && res.data.text) ? res.data.text : '';
-      const digits = text.replace(/\D/g, '');
-      // 3桁の連続数字を探す
-      const m = digits.match(/(\d{3})/);
-      if(m && m[1]){
-        stopScanner();
-        askConfirmNumber(m[1]);
-      } else {
-        // 1回では読めなかった場合、軽く待って次のフレームへ
-        ocrRunning = false;
-        return;
-      }
+
+      // 1回では読めなかった場合、軽く待って次のフレームへ
+      ocrRunning = false;
+      return;
     }catch(e){ console.warn('OCR error', e); }
     ocrRunning = false;
   }
