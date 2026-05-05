@@ -101,6 +101,8 @@
   let pendingScanSource = 'scan';
   let digitModel = null;
   let digitModelReady = null;
+  let tesseractWorker = null;
+  let tesseractWorkerReady = null;
   let uiState = 'scanner';
   let pendingOrder = null;
 
@@ -365,6 +367,38 @@
     return digitModelReady;
   }
 
+  async function ensureTesseractWorker(){
+    if(tesseractWorkerReady) return tesseractWorkerReady;
+    tesseractWorkerReady = (async () => {
+      if(!Tesseract || !Tesseract.createWorker){
+        console.warn('Tesseract worker API が利用できません');
+        return null;
+      }
+      try{
+        const worker = Tesseract.createWorker({ logger: () => {} });
+        await worker.load();
+        await worker.loadLanguage('eng');
+        await worker.initialize('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: '0123456789',
+          tessedit_pageseg_mode: '7',
+          tessedit_enable_dict_correction: '0',
+          load_system_dawg: '0',
+          load_freq_dawg: '0',
+          classify_bln_numeric_mode: '1',
+          preserve_interword_spaces: '0'
+        });
+        tesseractWorker = worker;
+        return worker;
+      }catch(e){
+        console.warn('Tesseract worker init failed', e);
+        tesseractWorker = null;
+        return null;
+      }
+    })();
+    return tesseractWorkerReady;
+  }
+
   async function classifyDigitCanvas(digitCanvas){
     if(!digitModel) return null;
     return tf.tidy(() => {
@@ -475,7 +509,7 @@
       videoEl.play().catch(()=>{});
       // OCR ループ
       if(ocrIntervalId) clearInterval(ocrIntervalId);
-      ocrIntervalId = setInterval(captureAndOcr, 1400);
+      ocrIntervalId = setInterval(captureAndOcr, 700);
     }).catch(err => {
       reader.innerHTML = '<div class="muted">カメラ起動に失敗しました。権限または端末の設定を確認してください。</div>';
     });
@@ -493,32 +527,19 @@
   async function recognizeFastThreeDigits(sourceCanvas){
     const src = sourceCanvas.getContext('2d').getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
     const { avg } = getImageLumaArray(src);
-    const base = Math.max(80, Math.min(180, avg));
-    const thresholds = [Math.round(base * 0.92), Math.round(base * 1.02)];
-    for(const threshold of thresholds){
-      for(const invert of [false, true]){
-        try{
-          const variant = thresholdToCanvas(sourceCanvas, threshold, invert);
-          const res = await Tesseract.recognize(variant.toDataURL('image/png'), 'eng', {
-            logger: () => {},
-            tessedit_char_whitelist: '0123456789',
-            tessedit_pageseg_mode: 7,
-            user_defined_dpi: '300',
-            tessedit_enable_dict_correction: '0',
-            load_system_dawg: '0',
-            load_freq_dawg: '0',
-            classify_bln_numeric_mode: '1',
-            preserve_interword_spaces: '0'
-          });
-          const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
-          const candidate = extractThreeDigits(text);
-          if(candidate){
-            return { value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) };
-          }
-        }catch(e){
-          console.warn('fast OCR failed', e);
-        }
+    const threshold = Math.max(70, Math.min(190, Math.round(avg * 1.02)));
+    try{
+      const variant = thresholdToCanvas(sourceCanvas, threshold, false);
+      const worker = await ensureTesseractWorker();
+      if(!worker) return null;
+      const res = await worker.recognize(variant.toDataURL('image/png'));
+      const text = res && res.data && typeof res.data.text === 'string' ? res.data.text : '';
+      const candidate = extractThreeDigits(text);
+      if(candidate){
+        return { value: candidate, source: 'tesseract', confidence: Number(res?.data?.confidence || 0) };
       }
+    }catch(e){
+      console.warn('fast OCR failed', e);
     }
     return null;
   }
@@ -528,13 +549,13 @@
     if(ocrRunning) return; if(!videoEl || videoEl.readyState < 2) return;
     ocrRunning = true;
     try{
-      const w = Math.min(videoEl.videoWidth || 640, 1280);
-      const h = Math.min(videoEl.videoHeight || 480, 720);
+      const w = Math.min(videoEl.videoWidth || 480, 960);
+      const h = Math.min(videoEl.videoHeight || 360, 540);
       const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d'); ctx.drawImage(videoEl, 0, 0, w, h);
       // 中央領域だけを使ってOCR精度を上げる
-      const cropW = Math.floor(w * 0.66);
-      const cropH = Math.floor(h * 0.35);
+      const cropW = Math.floor(w * 0.56);
+      const cropH = Math.floor(h * 0.28);
       const cropX = Math.floor((w - cropW) / 2);
       const cropY = Math.floor((h - cropH) / 2);
       const cropCanvas = document.createElement('canvas');
@@ -723,7 +744,9 @@
 
   function syncFromFirebase(){ if(!firebaseEnabled || !database) return; const ref = database.ref('orders'); ref.on('value', snap => { const data = snap.val() || {}; ORDERS.length = 0; Object.keys(data).forEach(k => { ORDERS.push({ firebaseKey: k, ...data[k] }); }); console.log('pickup synced', ORDERS.length); }); }
 
-  if(firebaseEnabled) syncFromFirebase(); setUiState('scanner'); startScanner();
+  if(firebaseEnabled) syncFromFirebase();
+  ensureTesseractWorker();
+  setUiState('scanner'); startScanner();
   </script>
 </body>
 </html>
