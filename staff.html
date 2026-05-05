@@ -108,6 +108,10 @@
           <div id="status" class="muted">---</div>
         </div>
         <div class="card" style="margin-top:12px">
+          <h3>今月の集計</h3>
+          <div id="monthSummaryQuick" class="muted">---</div>
+        </div>
+        <div class="card" style="margin-top:12px">
           <h3>本日の締め</h3>
           <div class="muted" style="line-height:1.7;margin-bottom:10px;">一日の終わりに、この日の注文詳細を消して集計だけ Firebase に残します。</div>
           <button class="btn btn-danger" onclick="closeDay()">本日締めを実行</button>
@@ -344,6 +348,7 @@
     renderNextList();
     renderServedList();
     renderSummaryList();
+    renderMonthQuickSummary();
   }
 
   function renderCounts(){ const keys = ['wa','morning_set','morning']; const container = document.getElementById('counts'); container.innerHTML = keys.map(k => { const total = ORDERS.filter(o => o.bento===k).reduce((s,o)=> s + (o.quantity||1), 0); const remain = ORDERS.filter(o => o.bento===k && !o.served).reduce((s,o)=> s + (o.quantity||1), 0); const label = k==='wa' ? '和食' : (k==='morning_set' ? 'モーニングセット' : 'モーニング'); return `<div class="row"><div><div class="bento">${label}</div><div class="muted">未受取:${remain} / 総:${total}</div></div><div class="pill">${remain}</div></div>`; }).join(''); }
@@ -475,6 +480,31 @@
     // 月切替ボタンのイベント
     document.getElementById('prevMonth').addEventListener('click', ()=>{ displayMonth--; if(displayMonth<0){ displayMonth=11; displayYear--; } renderSummaryList(); });
     document.getElementById('nextMonth').addEventListener('click', ()=>{ displayMonth++; if(displayMonth>11){ displayMonth=0; displayYear++; } renderSummaryList(); });
+  }
+
+  function renderMonthQuickSummary(){
+    const container = document.getElementById('monthSummaryQuick');
+    if(!container) return;
+    const year = displayYear;
+    const month = displayMonth;
+    const prefix = `${year}-${String(month+1).padStart(2,'0')}-`;
+    let totals = { total:0, wa:0, morning:0, morning_set:0, revenue:0 };
+    DAILY_SUMMARIES.forEach(day => {
+      if(!day || !day.date || !day.date.startsWith(prefix)) return;
+      const counts = day.counts || {};
+      totals.total += counts.total || 0;
+      totals.wa += counts.wa || 0;
+      totals.morning += counts.morning || 0;
+      totals.morning_set += counts.morning_set || 0;
+    });
+    totals.revenue = (totals.wa * (BENTO_INFO.wa.price || 0)) + (totals.morning * (BENTO_INFO.morning.price || 0)) + (totals.morning_set * (BENTO_INFO.morning_set.price || 0));
+    container.innerHTML = `
+      <div class="day-line">表示月: ${year}年${month + 1}月</div>
+      <div class="day-line">個数: ${totals.total}</div>
+      <div class="day-line">和食: ${totals.wa}</div>
+      <div class="day-line">モーニング: ${totals.morning}</div>
+      <div class="day-line">モーニングセット: ${totals.morning_set}</div>
+      <div class="day-line"><strong>売上: ¥${totals.revenue}</strong></div>`;
   }
 
   if(firebaseEnabled){ sync(); syncSummaries(); }

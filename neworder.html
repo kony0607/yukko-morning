@@ -24,6 +24,7 @@
     .stage{display:none}
     .stage.on{display:block}
     .big-note{font-size:15px;line-height:1.7;color:#555;margin-top:6px}
+    .disabled{opacity:.55;pointer-events:none}
   </style>
 </head>
 <body>
@@ -95,8 +96,24 @@
   document.getElementById('call').value = qs('call') || '';
 
   let selectedBento = '';
+  let busy = false;
+
+  function setBusy(state){
+    busy = state;
+    document.querySelectorAll('button, input, select').forEach(el => {
+      if(el.id === 'call') return;
+      if(el.id === 'qty') return;
+      if(el.id === 'priceInfo') return;
+      if(el.closest('#msg')) return;
+      if(el.classList.contains('btn-ghost') || el.classList.contains('btn-primary') || el.classList.contains('choice')){
+        el.disabled = state;
+      }
+      el.classList.toggle('disabled', state);
+    });
+  }
 
   function chooseBento(kind){
+    if(busy) return;
     selectedBento = kind;
     // 価格表示
     const price = BENTO_INFO[kind] ? `¥${BENTO_INFO[kind].price}` : '¥0';
@@ -111,12 +128,15 @@
   }
 
   function backToChoice(){
+    if(busy) return;
     document.getElementById('stage-coffee').classList.remove('on');
     document.getElementById('stage-choice').classList.add('on');
     document.getElementById('msg').textContent = '';
   }
 
   async function createSelected(withCoffee){
+    if(busy) return;
+    setBusy(true);
     const call = document.getElementById('call').value.replace(/\D/g,'').slice(0,3) || ('SD'+String(Date.now()).slice(-5));
     const qty = Math.max(1, Number(document.getElementById('qty').value || 1));
     const locker = 'SD' + String(Date.now()).slice(-7);
@@ -133,7 +153,7 @@
       source: 'pickup-new'
     };
     if(enabled && database){
-      try{ await database.ref('orders/' + locker).set(order); document.getElementById('msg').textContent = '作成しました。戻ります...'; setTimeout(()=>{ returnBack(); }, 1000); }catch(e){ document.getElementById('msg').textContent = '保存に失敗しました'; console.error(e); }
+      try{ await database.ref('orders/' + locker).set(order); document.getElementById('msg').textContent = '作成しました。戻ります...'; setTimeout(()=>{ returnBack(); }, 1000); }catch(e){ document.getElementById('msg').textContent = '保存に失敗しました'; console.error(e); setBusy(false); }
     } else {
       // Firebase が無効な場合はクエリで戻す
       document.getElementById('msg').textContent = 'Firebase 未接続のため作成できません。戻ります。'; setTimeout(()=>{ returnBack(); }, 900);
@@ -141,7 +161,7 @@
   }
 
   function returnBack(){ const from = qs('from') || 'pickup'; if(from==='pickup') location.href = 'pickup.html'; else location.href = 'index.html'; }
-  function cancel(){ returnBack(); }
+  function cancel(){ if(busy) return; returnBack(); }
   </script>
 </body>
 </html>
