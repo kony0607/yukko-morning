@@ -21,6 +21,10 @@
     .btn-primary{background:#1d6b4b;color:#fff}
     .btn-ghost{background:#fff;border:1px solid #ddd}
     #pickupResult{margin-top:14px}
+    .confirm{margin-top:14px;background:#fff;border:1px solid #ddd;border-radius:12px;padding:12px}
+    .confirm-code{font-size:44px;font-weight:800;line-height:1;text-align:center;margin-bottom:8px}
+    .confirm-text{text-align:center;color:#666;margin-bottom:10px}
+    .confirm-row{display:flex;gap:8px;justify-content:center}
   </style>
 </head>
 <body>
@@ -58,12 +62,13 @@
 
   const ORDERS = [];
   let html5QrCode = null;
-  const IGNORE_WINDOW_MS = 20 * 1000; // 20秒
+  const IGNORE_WINDOW_MS = 10 * 1000; // 10秒
   // OCR カメラ用
   let videoEl = null;
   let videoStream = null;
   let ocrIntervalId = null;
   let ocrRunning = false;
+  let pendingScanCode = '';
 
   function normalizeDigits(v){ return String(v||'').replace(/\D/g,''); }
   function buildCodeCandidates(raw){
@@ -102,7 +107,6 @@
     });
   }
 
-  function stopScanner(){ if(html5QrCode){ try{ html5QrCode.stop().catch(()=>{}); }catch(e){} html5QrCode=null; }}
   function stopScanner(){
     if(ocrIntervalId){ clearInterval(ocrIntervalId); ocrIntervalId = null; }
     if(videoEl && videoEl.pause) try{ videoEl.pause(); }catch(e){}
@@ -120,25 +124,80 @@
       const h = Math.min(videoEl.videoHeight || 480, 720);
       const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d'); ctx.drawImage(videoEl, 0, 0, w, h);
-      // 画像を少しトリミングして数字が中央に来ることを期待
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      const res = await Tesseract.recognize(dataUrl, 'eng', { logger: m => {} });
+      // 中央領域だけを使ってOCR精度を上げる
+      const cropW = Math.floor(w * 0.66);
+      const cropH = Math.floor(h * 0.35);
+      const cropX = Math.floor((w - cropW) / 2);
+      const cropY = Math.floor((h - cropH) / 2);
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = cropW; cropCanvas.height = cropH;
+      const cctx = cropCanvas.getContext('2d');
+      cctx.filter = 'grayscale(1) contrast(1.6) brightness(1.1)';
+      cctx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.9);
+      const res = await Tesseract.recognize(dataUrl, 'eng', {
+        logger: () => {},
+        tessedit_char_whitelist: '0123456789',
+        tessedit_pageseg_mode: 7
+      });
       const text = (res && res.data && res.data.text) ? res.data.text : '';
       const digits = text.replace(/\D/g, '');
       // 3桁の連続数字を探す
       const m = digits.match(/(\d{3})/);
       if(m && m[1]){
         stopScanner();
-        processScan(m[1]);
+        askConfirmNumber(m[1]);
+      } else {
+        // 1回では読めなかった場合、軽く待って次のフレームへ
+        ocrRunning = false;
+        return;
       }
     }catch(e){ console.warn('OCR error', e); }
     ocrRunning = false;
   }
 
+  function askConfirmNumber(code){
+    pendingScanCode = normalizeDigits(code).slice(-3);
+    document.getElementById('pickupResult').innerHTML = `
+      <div class="confirm">
+        <div class="confirm-code">${pendingScanCode}</div>
+        <div class="confirm-text">この番号でお間違いないですか？</div>
+        <div class="confirm-row">
+          <button class="btn btn-primary" onclick="confirmScanYes()">はい</button>
+          <button class="btn btn-ghost" onclick="confirmScanNo()">いいえ</button>
+        </div>
+      </div>`;
+  }
+
+  function confirmScanYes(){
+    const code = pendingScanCode;
+    pendingScanCode = '';
+    if(!code){ restartScanner(); return; }
+    processScan(code);
+  }
+
+  function confirmScanNo(){
+    pendingScanCode = '';
+    document.getElementById('pickupResult').innerHTML = '<div class="muted">再読み取りしてください。</div>';
+    setTimeout(()=> restartScanner(), 500);
+  }
+
   async function processScan(raw){
     const now = Date.now();
     const order = findOrderByRaw(raw);
-    if(!order){ showMessage('未登録の注文番号です。スタッフにお知らせください。','muted'); return; }
+    if(!order){
+      const code = normalizeDigits(raw).slice(-3);
+      document.getElementById('pickupResult').innerHTML = `
+        <div class="confirm">
+          <div class="confirm-code">${code || '---'}</div>
+          <div class="confirm-text">この番号は未登録です。新規注文を作成しますか？</div>
+          <div class="confirm-row">
+            <button class="btn btn-primary" onclick="goNewOrder('${code || ''}')">作成する</button>
+            <button class="btn btn-ghost" onclick="restartScanner()">戻る</button>
+          </div>
+        </div>`;
+      return;
+    }
     if(order.served){ showMessage('この注文は既に提供済みです。','muted'); return; }
     const last = order.lastScanAt ? new Date(order.lastScanAt).getTime() : 0;
     if(last && (now - last) < IGNORE_WINDOW_MS){ showMessage('連続スキャンと判断しました（ミス）。しばらく待ってください。','muted'); return; }
@@ -157,20 +216,17 @@
 
   function showMessage(text, cls){ const el = document.getElementById('pickupResult'); el.innerHTML = `<div class="${cls}">${text}</div>`; setTimeout(()=>{ el.innerHTML=''; restartScanner(); }, 2800); }
 
+  function goNewOrder(code){
+    const call = normalizeDigits(code).slice(-3);
+    window.location.href = `neworder.html?call=${encodeURIComponent(call)}&from=pickup`;
+  }
+
 
   // 手入力での確認（2回方式対応）
   function onManualConfirm(){
     const v = document.getElementById('manualInput').value.trim().replace(/\D/g,'').slice(0,3);
     if(!v) return;
-    // 処理はカメラスキャンと同じ
-    // 未登録なら新規ページへ誘導（indexの当日注文に合わせる）
-    const order = findOrderByRaw(v);
-    if(!order){
-      // neworder.html へ遷移して作成、戻る想定
-      window.location.href = `neworder.html?call=${encodeURIComponent(v)}&from=pickup`;
-      return;
-    }
-    processScan(v);
+    askConfirmNumber(v);
     document.getElementById('manualInput').value = '';
   }
   async function updateOrder(order){ if(!firebaseEnabled || !database) return; try{ await database.ref('orders/' + order.firebaseKey).update({ checkedInAt: order.checkedInAt || null, lastScanAt: order.lastScanAt || null, served: !!order.served, servedAt: order.servedAt || null, status: order.status || null }); }catch(e){ console.error('Firebase update failed', e); } }

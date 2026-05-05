@@ -8,22 +8,61 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <style>
     body{font-family:Meiryo, 'Noto Sans JP',sans-serif;background:#f6f3ea;margin:0;padding:18px;color:#1d1b16}
-    .card{background:#fff;padding:14px;border-radius:12px;border:1px solid #ded7c6;max-width:720px;margin:0 auto}
+    .card{background:#fff;padding:16px;border-radius:12px;border:1px solid #ded7c6;max-width:860px;margin:0 auto}
     .row{margin-bottom:10px}
     .label{font-size:13px;margin-bottom:6px;color:#555}
     input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #ddd}
     .btn{padding:10px 12px;border-radius:10px;border:0;cursor:pointer}
     .btn-primary{background:#1d6b4b;color:#fff}
     .btn-ghost{background:#fff;border:1px solid #ddd}
+    .choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+    .choice{border:2px solid #ded7c6;border-radius:14px;background:#fff;padding:10px;cursor:pointer;text-align:left}
+    .choice:hover{border-color:#1d6b4b}
+    .choice-img{width:100%;height:160px;object-fit:cover;border-radius:12px;display:block;margin-bottom:8px;background:#f7f7f7}
+    .choice-name{font-size:20px;font-weight:800}
+    .choice-sub{font-size:13px;color:#666;margin-top:4px}
+    .stage{display:none}
+    .stage.on{display:block}
+    .big-note{font-size:15px;line-height:1.7;color:#555;margin-top:6px}
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>未登録の番号で新規注文を作成</h2>
+    <h2>新規注文を作成</h2>
+    <div class="big-note">読み取った番号を確認し、画像を見ながら和食 / 洋食を選んでください。</div>
     <div class="row"><div class="label">読み取った呼び出し番号</div><input id="call" readonly /></div>
-    <div class="row"><div class="label">弁当</div><select id="bento"><option value="wa">和食</option><option value="morning">洋食（コーヒー選択可）</option><option value="morning_set">洋食セット（コーヒー付）</option></select></div>
     <div class="row"><div class="label">個数</div><input id="qty" type="number" min="1" value="1" /></div>
-    <div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="create()">作成して戻る</button><button class="btn btn-ghost" onclick="cancel()">キャンセル</button></div>
+
+    <div id="stage-choice" class="stage on">
+      <div class="choice-grid">
+        <button class="choice" onclick="chooseBento('wa')">
+          <img class="choice-img" src="和食.jpg" alt="和食" onerror="this.style.display='none'" />
+          <div class="choice-name">和食</div>
+          <div class="choice-sub">画像を見て選べます</div>
+        </button>
+        <button class="choice" onclick="chooseBento('morning')">
+          <img class="choice-img" src="洋食.jpg" alt="洋食" onerror="this.style.display='none'" />
+          <div class="choice-name">洋食</div>
+          <div class="choice-sub">このあとコーヒー確認へ進みます</div>
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-ghost" onclick="cancel()">キャンセル</button></div>
+    </div>
+
+    <div id="stage-coffee" class="stage">
+      <div class="choice-grid">
+        <button class="choice" onclick="createSelected(true)">
+          <div class="choice-name">コーヒーあり</div>
+          <div class="choice-sub">洋食にコーヒーを付ける</div>
+        </button>
+        <button class="choice" onclick="createSelected(false)">
+          <div class="choice-name">コーヒーなし</div>
+          <div class="choice-sub">洋食単品で作成する</div>
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-ghost" onclick="backToChoice()">戻る</button></div>
+    </div>
+
     <div id="msg" style="margin-top:12px;color:#666"></div>
   </div>
 
@@ -44,11 +83,30 @@
   function qs(name){ const u=new URL(location.href); return u.searchParams.get(name); }
   document.getElementById('call').value = qs('call') || '';
 
-  async function create(){
+  let selectedBento = '';
+
+  function chooseBento(kind){
+    selectedBento = kind;
+    if(kind === 'morning'){
+      document.getElementById('stage-choice').classList.remove('on');
+      document.getElementById('stage-coffee').classList.add('on');
+      document.getElementById('msg').textContent = '洋食を選びました。コーヒーを選択してください。';
+      return;
+    }
+    createSelected(false);
+  }
+
+  function backToChoice(){
+    document.getElementById('stage-coffee').classList.remove('on');
+    document.getElementById('stage-choice').classList.add('on');
+    document.getElementById('msg').textContent = '';
+  }
+
+  async function createSelected(withCoffee){
     const call = document.getElementById('call').value.replace(/\D/g,'').slice(0,3) || ('SD'+String(Date.now()).slice(-5));
-    const bento = document.getElementById('bento').value;
     const qty = Math.max(1, Number(document.getElementById('qty').value || 1));
     const locker = 'SD' + String(Date.now()).slice(-7);
+    const bento = selectedBento === 'morning' && withCoffee ? 'morning_set' : (selectedBento || 'wa');
     const order = {
       lockerFull: locker,
       callCode: call,

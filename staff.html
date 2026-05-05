@@ -9,29 +9,84 @@
   <style>
     body{font-family:Meiryo, 'Noto Sans JP',sans-serif;background:#f6f3ea;color:#1d1b16;margin:0}
     .wrap{max-width:980px;margin:0 auto;padding:18px}
-    .title{font-size:18px;font-weight:800;margin-bottom:12px}
+    .title{font-size:22px;font-weight:800;margin-bottom:12px}
     .grid{display:grid;grid-template-columns:1fr 320px;gap:12px}
-    .card{background:#fff;padding:12px;border-radius:12px;border:1px solid #ded7c6}
-    .card h3{margin:0 0 8px 0;font-size:14px}
+    .card{background:#fff;padding:18px;border-radius:12px;border:1px solid #ded7c6}
+    .card h3{margin:0 0 12px 0;font-size:19px}
     .list{display:flex;flex-direction:column;gap:8px}
-    .row{padding:8px;border-radius:8px;border:1px solid #eee;display:flex;justify-content:space-between;align-items:center}
-    .bento{font-weight:700}
-    .muted{color:#777}
-    .pill{background:#f1ece1;padding:6px 8px;border-radius:999px}
+    .row{padding:14px;border-radius:10px;border:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .bento{font-weight:700;font-size:22px}
+    .muted{color:#777;font-size:14px}
+    .pill{background:#f1ece1;padding:8px 12px;border-radius:999px;font-size:18px;font-weight:700}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    .tab{padding:10px 12px;border:1px solid #ddd;border-radius:999px;background:#fff;cursor:pointer;font-weight:700}
+    .tab.on{background:#1d6b4b;color:#fff;border-color:#1d6b4b}
+    .panel{display:none}
+    .panel.on{display:block}
+    .status-badge{padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700}
+    .status-wait{background:#fff4db;color:#8a6508}
+    .status-checked{background:#dff0e7;color:#1d6b4b}
+    .status-served{background:#e7ecff;color:#2d49aa}
+    .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .btn-ghost{background:#fff;border:1px solid #ddd}
+    .btn-sm{padding:7px 10px;font-size:13px}
+    .form-grid{display:grid;grid-template-columns:1.2fr 1fr .8fr auto;gap:8px}
+    .input,.select{padding:10px;border:1px solid #ddd;border-radius:8px;font-size:16px}
+    .btn{border:0;border-radius:10px;cursor:pointer;padding:10px 14px;font-size:15px;font-weight:700}
+    .btn-primary{background:#1d6b4b;color:#fff}
+    .btn-danger{background:#b63a33;color:#fff}
+    .small-input{width:84px;padding:7px 8px;font-size:14px}
+    .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+    .day-card{border:1px solid #eee;border-radius:12px;padding:12px;background:#fff}
+    .day-date{font-size:17px;font-weight:800;margin-bottom:6px}
+    .day-line{font-size:14px;color:#555;line-height:1.6}
+    @media (max-width:900px){
+      .grid{grid-template-columns:1fr}
+      .form-grid{grid-template-columns:1fr 1fr}
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="title">スタッフ画面 — 調理順キュー</div>
+    <div class="card" style="margin-bottom:12px;">
+      <h3>新規注文を追加</h3>
+      <div class="form-grid">
+        <input id="newCall" class="input" inputmode="numeric" maxlength="3" placeholder="呼び出し番号(3桁)" oninput="this.value=this.value.replace(/\D/g,'').slice(0,3)" />
+        <select id="newBento" class="select">
+          <option value="wa">和食</option>
+          <option value="morning">モーニング</option>
+          <option value="morning_set">モーニングセット</option>
+        </select>
+        <input id="newQty" class="input" type="number" min="1" step="1" value="1" />
+        <button class="btn btn-primary" onclick="createOrder()">追加</button>
+      </div>
+      <div id="createMsg" class="muted" style="margin-top:8px;"></div>
+    </div>
+    <div class="tabs">
+      <button id="tab-overall" class="tab on" onclick="switchPanel('overall')">全体マップ</button>
+      <button id="tab-queue" class="tab" onclick="switchPanel('queue')">受付順キュー</button>
+      <button id="tab-served" class="tab" onclick="switchPanel('served')">提供済み一覧</button>
+      <button id="tab-summary" class="tab" onclick="switchPanel('summary')">日別集計</button>
+    </div>
     <div class="grid">
       <div>
-        <div class="card">
+        <div id="panel-overall" class="card panel on">
+          <h3>予約注文の全体マップ（種類別）</h3>
+          <div id="overallMap" class="list"></div>
+        </div>
+        <div id="panel-queue" class="card panel">
           <h3>次に作る順番（受付順）</h3>
           <div id="nextList" class="list"></div>
         </div>
-        <div class="card" style="margin-top:12px">
-          <h3>未受取一覧（詳細）</h3>
-          <div id="waitingDetailed" class="list"></div>
+        <div id="panel-served" class="card panel">
+          <h3>提供済み一覧</h3>
+          <div id="servedList" class="list"></div>
+        </div>
+        <div id="panel-summary" class="card panel">
+          <h3>日別集計カレンダー</h3>
+          <div class="muted" style="margin-bottom:10px;">日ごとに全体数・和食・モーニング系の提供数を保存しています。</div>
+          <div id="summaryList" class="summary-grid"></div>
         </div>
       </div>
       <div>
@@ -42,6 +97,11 @@
         <div class="card" style="margin-top:12px">
           <h3>同期状況</h3>
           <div id="status" class="muted">---</div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <h3>本日の締め</h3>
+          <div class="muted" style="line-height:1.7;margin-bottom:10px;">一日の終わりに、この日の注文詳細を消して集計だけ Firebase に残します。</div>
+          <button class="btn btn-danger" onclick="closeDay()">本日締めを実行</button>
         </div>
       </div>
     </div>
@@ -64,35 +124,285 @@
   try{ firebaseApp = firebase.initializeApp(firebaseConfig); database = firebase.database(firebaseApp); firebaseEnabled = true; }catch(e){ console.warn('Firebase init failed', e.message); }
 
   const ORDERS = [];
+  const DAILY_SUMMARIES = [];
+  let currentPanel = 'overall';
+
+  function normalizeDigits(v){ return String(v || '').replace(/\D/g, ''); }
+
+  function bentoLabel(key){
+    if(key === 'wa') return '和食';
+    if(key === 'morning_set') return 'モーニングセット';
+    if(key === 'morning') return 'モーニング';
+    return key || '不明';
+  }
+
+  function getStatusInfo(order){
+    if(order.served) return { text: '提供済み', cls: 'status-served' };
+    if(order.checkedInAt) return { text: '受付済み', cls: 'status-checked' };
+    return { text: '未受付', cls: 'status-wait' };
+  }
+
+  function switchPanel(name){
+    currentPanel = name;
+    document.getElementById('panel-overall').classList.toggle('on', name === 'overall');
+    document.getElementById('panel-queue').classList.toggle('on', name === 'queue');
+    document.getElementById('panel-served').classList.toggle('on', name === 'served');
+    document.getElementById('tab-overall').classList.toggle('on', name === 'overall');
+    document.getElementById('tab-queue').classList.toggle('on', name === 'queue');
+    document.getElementById('tab-served').classList.toggle('on', name === 'served');
+    document.getElementById('tab-summary').classList.toggle('on', name === 'summary');
+    renderAll();
+  }
+
+  async function updateOrder(firebaseKey, patch){
+    if(!firebaseEnabled || !database || !firebaseKey) return;
+    try{
+      await database.ref('orders/' + firebaseKey).update(patch);
+    }catch(e){
+      console.error('updateOrder failed', e);
+    }
+  }
+
+  async function markCheckedIn(firebaseKey){
+    const now = new Date().toISOString();
+    await updateOrder(firebaseKey, { checkedInAt: now, status: 'checked-in', served: false, servedAt: null, lastScanAt: now });
+  }
+
+  async function markServed(firebaseKey){
+    const now = new Date().toISOString();
+    await updateOrder(firebaseKey, { served: true, servedAt: now, status: 'served', lastScanAt: now, checkedInAt: now });
+  }
+
+  async function resetToWaiting(firebaseKey){
+    await updateOrder(firebaseKey, { served: false, servedAt: null, checkedInAt: null, status: 'waiting' });
+  }
+
+  async function updateQuantity(firebaseKey){
+    const input = document.getElementById('qty-' + firebaseKey);
+    if(!input) return;
+    const quantity = Math.max(1, Number(input.value || 1));
+    await updateOrder(firebaseKey, { quantity });
+  }
+
+  async function fixCallCode(firebaseKey){
+    const input = document.getElementById('fix-' + firebaseKey);
+    if(!input) return;
+    const code = normalizeDigits(input.value).slice(0, 3).padStart(3, '0');
+    if(code === '000') return;
+    await updateOrder(firebaseKey, { callCode: code });
+  }
+
+  function todayKey(date = new Date()){
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function bentoGroupTotals(items){
+    const totals = { total: 0, wa: 0, morning: 0, morning_set: 0, served: 0 };
+    items.forEach(o => {
+      const qty = Math.max(1, o.quantity || 1);
+      totals.total += qty;
+      if(o.bento === 'wa') totals.wa += qty;
+      if(o.bento === 'morning') totals.morning += qty;
+      if(o.bento === 'morning_set') totals.morning_set += qty;
+      if(o.served) totals.served += qty;
+    });
+    return totals;
+  }
+
+  async function closeDay(){
+    if(!firebaseEnabled || !database) return;
+    const date = todayKey();
+    const items = ORDERS.slice();
+    if(!items.length){
+      document.getElementById('status').textContent = '締め対象がありません';
+      return;
+    }
+    if(!confirm(`${date} の締めを実行します。注文詳細を消して集計だけ保存します。よろしいですか？`)) return;
+
+    const summary = {
+      date,
+      createdAt: new Date().toISOString(),
+      counts: bentoGroupTotals(items),
+      items: items.map(o => ({
+        callCode: o.callCode,
+        bento: o.bento,
+        quantity: o.quantity || 1,
+        served: !!o.served
+      }))
+    };
+
+    try{
+      await database.ref('dailySummaries/' + date).set(summary);
+      await database.ref('orders').remove();
+      document.getElementById('status').textContent = `${date} の締めを保存しました`;
+    }catch(e){
+      console.error(e);
+      document.getElementById('status').textContent = '締め保存に失敗しました';
+    }
+  }
+
+  async function createOrder(){
+    if(!firebaseEnabled || !database){
+      document.getElementById('createMsg').textContent = 'Firebase未接続のため追加できません';
+      return;
+    }
+    const callCode = normalizeDigits(document.getElementById('newCall').value).slice(0,3).padStart(3, '0');
+    const bento = document.getElementById('newBento').value;
+    const quantity = Math.max(1, Number(document.getElementById('newQty').value || 1));
+    if(!callCode || callCode === '000'){
+      document.getElementById('createMsg').textContent = '呼び出し番号(3桁)を入力してください';
+      return;
+    }
+
+    const locker = 'ST' + String(Date.now()).slice(-7);
+    const order = {
+      lockerFull: locker,
+      callCode,
+      bento,
+      quantity,
+      served: false,
+      createdAt: new Date().toISOString(),
+      source: 'staff-manual'
+    };
+
+    try{
+      await database.ref('orders/' + locker).set(order);
+      document.getElementById('createMsg').textContent = '注文を追加しました';
+      document.getElementById('newCall').value = '';
+      document.getElementById('newQty').value = 1;
+    }catch(e){
+      document.getElementById('createMsg').textContent = '保存に失敗しました';
+      console.error(e);
+    }
+  }
 
   function sync(){ if(!firebaseEnabled || !database) return; const ref = database.ref('orders'); ref.on('value', snap => { const data = snap.val() || {}; ORDERS.length = 0; Object.keys(data).forEach(k => { ORDERS.push({ firebaseKey: k, ...data[k] }); }); renderAll(); document.getElementById('status').textContent = '同期済み ' + new Date().toLocaleTimeString(); }); }
 
-  function renderAll(){ renderCounts(); renderNextList(); renderWaitingDetailed(); }
+  function syncSummaries(){
+    if(!firebaseEnabled || !database) return;
+    database.ref('dailySummaries').on('value', snap => {
+      const data = snap.val() || {};
+      DAILY_SUMMARIES.length = 0;
+      Object.keys(data).sort().reverse().forEach(date => {
+        DAILY_SUMMARIES.push({ date, ...data[date] });
+      });
+      renderSummaryList();
+    });
+  }
+
+  function renderAll(){
+    renderCounts();
+    renderOverallMap();
+    renderNextList();
+    renderServedList();
+    renderSummaryList();
+  }
 
   function renderCounts(){ const keys = ['wa','morning_set','morning']; const container = document.getElementById('counts'); container.innerHTML = keys.map(k => { const total = ORDERS.filter(o => o.bento===k).reduce((s,o)=> s + (o.quantity||1), 0); const remain = ORDERS.filter(o => o.bento===k && !o.served).reduce((s,o)=> s + (o.quantity||1), 0); const label = k==='wa' ? '和食' : (k==='morning_set' ? 'モーニングセット' : 'モーニング'); return `<div class="row"><div><div class="bento">${label}</div><div class="muted">未受取:${remain} / 総:${total}</div></div><div class="pill">${remain}</div></div>`; }).join(''); }
 
+  function renderOverallMap(){
+    const container = document.getElementById('overallMap');
+    const groups = ['wa', 'morning', 'morning_set'];
+    let html = '';
+    groups.forEach(group => {
+      const items = ORDERS.filter(o => o.bento === group).slice().sort((a,b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return ta - tb;
+      });
+      html += `<div class="row" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div class="bento">${bentoLabel(group)}</div>
+          <div class="pill">${items.reduce((s,o)=>s+(o.quantity||1),0)}件</div>
+        </div>
+      </div>`;
+
+      if(!items.length){
+        html += '<div class="row"><div class="muted">該当なし</div></div>';
+      } else {
+        html += items.map(o => {
+          const status = getStatusInfo(o);
+          return `<div class="row">
+            <div>
+              <div style="font-size:20px;font-weight:700;">${o.callCode || '---'} <span class="muted">${o.lockerFull || ''}</span></div>
+              <div class="muted">個数:${o.quantity || 1}</div>
+              <div class="status-badge ${status.cls}">${status.text}</div>
+            </div>
+            <div class="actions">
+              <input id="fix-${o.firebaseKey}" class="input small-input" maxlength="3" value="${o.callCode || ''}" oninput="this.value=this.value.replace(/\D/g,'').slice(0,3)" />
+              <input id="qty-${o.firebaseKey}" class="input small-input" type="number" min="1" step="1" value="${o.quantity || 1}" />
+              <button class="btn btn-ghost btn-sm" onclick="fixCallCode('${o.firebaseKey}')">番号修正</button>
+              <button class="btn btn-ghost btn-sm" onclick="updateQuantity('${o.firebaseKey}')">個数修正</button>
+              <button class="btn btn-ghost btn-sm" onclick="markCheckedIn('${o.firebaseKey}')">受付済みにする</button>
+              <button class="btn btn-primary btn-sm" onclick="markServed('${o.firebaseKey}')">提供済みにする</button>
+              <button class="btn btn-ghost btn-sm" onclick="resetToWaiting('${o.firebaseKey}')">未受付に戻す</button>
+            </div>
+          </div>`;
+        }).join('');
+      }
+    });
+    container.innerHTML = html;
+  }
+
   function renderNextList(){
-    // 優先 = checkedInAt（受付された順）。checkedInAtのないものは createdAt の順。
-    const unserved = ORDERS.filter(o => !o.served).slice().sort((a,b) => {
-      const ta = a.checkedInAt ? new Date(a.checkedInAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-      const tb = b.checkedInAt ? new Date(b.checkedInAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    // 受付済みのみを受付順で表示
+    const queue = ORDERS.filter(o => !o.served && !!o.checkedInAt).slice().sort((a,b) => {
+      const ta = new Date(a.checkedInAt).getTime();
+      const tb = new Date(b.checkedInAt).getTime();
       return ta - tb;
     });
 
     const container = document.getElementById('nextList');
-    if(!unserved.length){ container.innerHTML = '<div class="muted">調理する注文はありません</div>'; return; }
+    if(!queue.length){ container.innerHTML = '<div class="muted">受付済みキューはありません</div>'; return; }
 
     // 先頭から順に表示（弁当種別と呼び出し番号）
-    container.innerHTML = unserved.slice(0, 40).map(o => {
-      const label = o.bento === 'wa' ? '和食' : (o.bento === 'morning_set' ? 'モーニングセット' : 'モーニング');
-      const t = o.checkedInAt ? new Date(o.checkedInAt).toLocaleTimeString() : (o.createdAt ? new Date(o.createdAt).toLocaleTimeString() : '');
-      return `<div class="row"><div><div class="bento">${label} <span class="muted">(${o.callCode})</span></div><div class="muted">受付: ${t}</div></div><div class="pill">${o.quantity||1}</div></div>`;
+    container.innerHTML = queue.slice(0, 80).map(o => {
+      const status = getStatusInfo(o);
+      const t = o.checkedInAt ? new Date(o.checkedInAt).toLocaleTimeString() : '';
+      return `<div class="row"><div><div class="bento">${bentoLabel(o.bento)} <span class="muted">(${o.callCode})</span></div><div class="muted">受付: ${t}</div><div class="status-badge ${status.cls}">${status.text}</div></div><div class="pill">${o.quantity||1}</div></div>`;
     }).join('');
   }
 
-  function renderWaitingDetailed(){ const container = document.getElementById('waitingDetailed'); const waiting = ORDERS.filter(o => !o.served).slice().sort((a,b)=> (a.callCode||'') > (b.callCode||'')); if(!waiting.length){ container.innerHTML = '<div class="muted">全員受取済み</div>'; return; } container.innerHTML = waiting.map(o=> `<div class="row"><div><div><strong>${o.callCode}</strong> ${o.lockerFull}</div><div class="muted">${o.bento} / 個数:${o.quantity||1}</div></div><div class="muted">${o.checkedInAt? '受付:' + new Date(o.checkedInAt).toLocaleTimeString() : ''}</div></div>`).join(''); }
+  function renderServedList(){
+    const container = document.getElementById('servedList');
+    const served = ORDERS.filter(o => !!o.served).slice().sort((a,b)=> {
+      const ta = a.servedAt ? new Date(a.servedAt).getTime() : 0;
+      const tb = b.servedAt ? new Date(b.servedAt).getTime() : 0;
+      return tb - ta;
+    });
+    if(!served.length){
+      container.innerHTML = '<div class="muted">まだ提供済みはありません</div>';
+      return;
+    }
+    container.innerHTML = served.map(o => {
+      const t = o.servedAt ? new Date(o.servedAt).toLocaleTimeString() : '';
+      return `<div class="row"><div><div style="font-size:22px;"><strong>${o.callCode}</strong> ${o.lockerFull || ''}</div><div class="muted">${bentoLabel(o.bento)} / 個数:${o.quantity||1}</div><div class="status-badge status-served">提供済み</div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="resetToWaiting('${o.firebaseKey}')">未受付へ戻す</button><div class="muted">提供: ${t}</div></div></div>`;
+    }).join('');
+  }
 
-  if(firebaseEnabled) sync();
+  function renderSummaryList(){
+    const container = document.getElementById('summaryList');
+    if(!container) return;
+    if(!DAILY_SUMMARIES.length){
+      container.innerHTML = '<div class="muted">まだ日別集計がありません</div>';
+      return;
+    }
+    container.innerHTML = DAILY_SUMMARIES.slice(0, 31).map(day => {
+      const counts = day.counts || {};
+      return `<div class="day-card">
+        <div class="day-date">${day.date}</div>
+        <div class="day-line">全体: ${counts.total || 0} 個</div>
+        <div class="day-line">和食: ${counts.wa || 0} 個</div>
+        <div class="day-line">モーニング: ${counts.morning || 0} 個</div>
+        <div class="day-line">モーニングセット: ${counts.morning_set || 0} 個</div>
+      </div>`;
+    }).join('');
+  }
+
+  if(firebaseEnabled){ sync(); syncSummaries(); }
   </script>
 </body>
 </html>
